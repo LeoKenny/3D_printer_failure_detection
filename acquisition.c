@@ -20,11 +20,11 @@ const double conversion_const = (2 * 2.0)/1024.0;   // Conversion
 const int rw_bit = 7;                               // Read/Write bit
 const int multi_byte_bit = 6;                       // Mutiple byte bit
 
-
 // SPI comm configuration
 const int spi_speed = 2000000;                      // SPI communication speed, bps
 const int spi_channel = 0;                          // SPI communication channel
 const int spi_buffer_size = 7;                      // Communication buffer size
+const double delay_read = 0.006;                    // Delay for reading FIFO update
 
 enum { NS_PER_SECOND = 1000000000,
        MS_PER_NS = 1000000,
@@ -56,8 +56,8 @@ double time_delta_now(struct timespec t1){
 void delay_ms(double ms){
     struct timespec delay;
     delay.tv_sec = (int)(ms/MS_PER_SECOND);
-    delay.tv_nsec = (ms - (int)(ms/MS_PER_SECOND)*MS_PER_SECOND)*MS_PER_NS;
-    nanosleep(&delay,&delay);
+    delay.tv_nsec = (long int)((ms - (int)(ms/MS_PER_SECOND)*MS_PER_SECOND)*MS_PER_NS);
+    nanosleep(&delay,NULL);
 }
 
 int spi_read(int spi_handle, char *command, char *buffer, int count){
@@ -68,7 +68,7 @@ int spi_read(int spi_handle, char *command, char *buffer, int count){
     return spiXfer(spi_handle, command, buffer, count);
 }
 
-void clear_FIFO(int spi_handle){
+void clear_fifo(int spi_handle){
     char command[2];
     char config = 0;
 
@@ -81,11 +81,30 @@ void clear_FIFO(int spi_handle){
     // Clearing FIFO
     command[1] = 0;
     spiWrite(spi_handle, command, 2);
-    delay_ms(1);
+    delay_ms(10);
 
     // Getting old configuration back
     command[1] = config;
     spiWrite(spi_handle, command, 2);
+}
+
+int fifo_status(int spi_handle){
+    char buffer[spi_buffer_size];
+
+    buffer[0] = FIFO_STATUS;
+    spi_read(spi_handle, buffer, buffer, 2);
+
+    return buffer[1] & 0x3F;
+}
+
+void clear_fifo_forced(int spi_handle){
+    char buffer[spi_buffer_size];
+
+    while(fifo_status(spi_handle)){
+        buffer[0] = DATAX0;
+        spi_read(spi_handle, buffer, buffer, spi_buffer_size);
+        delay_ms(0.006);
+    }
 }
 
 void configure_adxl(int spi_handle){
@@ -103,8 +122,7 @@ void configure_adxl(int spi_handle){
 
     // Set Sample Rate
     command[0] = BW_RATE;
-    command[1] = 0x06;
-    // command[1] = 0x0F;
+    command[1] = 0x0F;
     // 0 | 0 | 0 | LOW_POWER | Rate
     // 0 | 0 | 0 |     0     | 1111
     // 0 | 0 | 0 |    OFF    | 3200Hz
@@ -177,39 +195,26 @@ int verify_spi(int spi_handle){
     return spi_handle;
 }
 
-int fifo_status(int spi_handle){
-    char buffer[spi_buffer_size];
-
-    buffer[0] = FIFO_STATUS;
-    int result = spi_read(spi_handle, buffer, buffer, 2);
-    int sampled_values = buffer[1] & 0x3F;
-    int trigger = buffer[1] >> 7;
-    printf("RAW:%x - Sampled Values: %d - Triggered: %d - Result: %d\n",
-            buffer[1], sampled_values, trigger, result);
-    return sampled_values;
-}
-
 void trigger_status(int spi_handle, int *watermark_trigger,int *overrun_trigger){
     char buffer[spi_buffer_size];
 
     buffer[0] = INT_SOURCE;
-    int result = spi_read(spi_handle, buffer, buffer, 2);
-    int watermark_trigger = (buffer[1] & 0x02)>>1;
-    int overrun_trigger = (buffer[1] & 0x01);
-    printf("RAW: %x - Watermark: %d - Overrun: %d\n",
-            buffer[1], watermark_trigger, overrun_trigger);
+
+    spi_read(spi_handle, buffer, buffer, 2);
+    *watermark_trigger = (buffer[1] & 0x02)>>1;
+    *overrun_trigger = (buffer[1] & 0x01);
 }
 
 int main(int argc, char *argv[]) {
     char buffer[spi_buffer_size];
     int spi_handle;
-    int result, sampled_values, trigger, watermark_trigger, overrun_trigger;
+    int result, sampled_values, watermark_trigger, overrun_trigger;
     int x, y, z, t;
     double *time_data, *x_data, *y_data, *z_data;
     struct timespec start_time;
 
     int samples_counter = 0;    // counter of samples
-    double sample_time = 4;       // sample time in seconds
+    double sample_time = 5;       // sample time in seconds
     int sample_rate = 3200;     // sample rate in Hz
     char output_name[256] = "data.csv";
 
@@ -233,44 +238,46 @@ int main(int argc, char *argv[]) {
 
     // Starting acquisition
     printf("Sample Time: %.6f seconds\n",sample_time);
+    printf("Sample Delay time: %.6f\n", 1/(double)sample_rate);
 
-    clear_FIFO(spi_handle);
+    clear_fifo_forced(spi_handle);
+    delay_ms(1/(double)sample_rate);
+
     clock_gettime(CLOCK_REALTIME, &start_time);
-    delay_ms(0.006);
 
-    fifo_status(spi_handle);
-    trigger_status(spi_handle, &watermark_trigger, &overrun_trigger);
-
-    clear_FIFO(spi_handle);
-    delay_ms(0.006);
-
+    printf("Delta: %f\n", time_delta_now(start_time));
     while(time_delta_now(start_time) < sample_time){
-
         sampled_values = fifo_status(spi_handle);
         trigger_status(spi_handle, &watermark_trigger, &overrun_trigger);
 
+        if(overrun_trigger){
+            printf("Overrun!");
+            printf("Delta: %f\n", time_delta_now(start_time));
+        }
+
         if((result>0) && (watermark_trigger>0)){
+            // printf("Delta: %f\n", time_delta_now(start_time));
             for(int i=0; i<sampled_values; i++,delay_ms(0.006)){
                 buffer[0] = DATAX0;
                 result = spi_read(spi_handle, buffer, buffer, spi_buffer_size);
                 if(result < spi_buffer_size){
                     printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
                 }
-            //     else{
-            //         x = (buffer[1]<<8)|buffer[0];
-            //         y = (buffer[3]<<8)|buffer[2];
-            //         z = (buffer[5]<<8)|buffer[4];
-            //         t = difftime(time(NULL), start_time);
+                else{
+                    x = (buffer[2]<<8)|buffer[1];
+                    y = (buffer[4]<<8)|buffer[3];
+                    z = (buffer[6]<<8)|buffer[5];
+                    t = time_delta_now(start_time);
 
-            //         x_data[samples_counter] = x;
-            //         y_data[samples_counter] = y;
-            //         z_data[samples_counter] = z;
-            //         time_data[samples_counter] = t;
-            //         samples_counter+=1;
-            //     }
+                    x_data[samples_counter] = x*conversion_const;
+                    y_data[samples_counter] = y*conversion_const;
+                    z_data[samples_counter] = z*conversion_const;
+                    time_data[samples_counter] = t;
+                    samples_counter+=1;
+                }
             }
         }
-        delay_ms(160);
+        delay_ms(1000/(double)sample_rate);
     }
 
     printf("\nElapsed Time: %.6f seconds\n", time_delta_now(start_time));
