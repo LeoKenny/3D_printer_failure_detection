@@ -19,6 +19,7 @@
 const double conversion_const = (2 * 2.0)/1024.0;   // Conversion
 const int rw_bit = 7;                               // Read/Write bit
 const int multi_byte_bit = 6;                       // Mutiple byte bit
+const int fifo_size = 33;                           // Max number of saved values, FIFO + last reading
 
 // SPI comm configuration
 const int spi_speed = 2000000;                      // SPI communication speed, bps
@@ -205,6 +206,17 @@ void trigger_status(int spi_handle, int *watermark_trigger,int *overrun_trigger)
     *overrun_trigger = (buffer[1] & 0x01);
 }
 
+void save_data(char *output_name, double *time_data, double *x_data, double *y_data,
+              double *z_data, int samples_counter){
+    // Save data
+    FILE * pFile;
+    pFile = fopen(output_name, "a");
+    for(int i=0; i <= samples_counter; i++){
+        fprintf(pFile, "%.4f, %.4f, %.4f, %.4f\n", time_data[i], x_data[i], y_data[i], z_data[i]);
+    }
+    fclose(pFile);
+}
+
 int main(int argc, char *argv[]) {
     char buffer[spi_buffer_size];
     int spi_handle;
@@ -219,10 +231,16 @@ int main(int argc, char *argv[]) {
     char output_name[256] = "data.csv";
 
     // Allocate space for data
-    x_data = malloc(sample_time * sample_rate * sizeof(double) * 20);
-    y_data = malloc(sample_time * sample_rate * sizeof(double) * 20);
-    z_data = malloc(sample_time * sample_rate * sizeof(double) * 20);
-    time_data = malloc(sample_time * sample_rate * sizeof(double) * 20);
+    x_data = malloc(fifo_size * sizeof(double));
+    y_data = malloc(fifo_size * sizeof(double));
+    z_data = malloc(fifo_size * sizeof(double));
+    time_data = malloc(fifo_size * sizeof(double));
+
+    // Create Output file, and put header
+    FILE * pFile;
+    pFile = fopen(output_name, "w");
+    fprintf(pFile, "time, x, y, z\n");
+    fclose(pFile);
 
     // Starting GPIO
     if (gpioInitialise() == PI_INIT_FAILED){      // pigpio initialisation failed.
@@ -238,14 +256,12 @@ int main(int argc, char *argv[]) {
 
     // Starting acquisition
     printf("Sample Time: %.6f seconds\n",sample_time);
-    printf("Sample Delay time: %.6f\n", 1/(double)sample_rate);
 
     clear_fifo_forced(spi_handle);
     delay_ms(1/(double)sample_rate);
 
     clock_gettime(CLOCK_REALTIME, &start_time);
 
-    printf("Delta: %f\n", time_delta_now(start_time));
     while(time_delta_now(start_time) < sample_time){
         sampled_values = fifo_status(spi_handle);
         trigger_status(spi_handle, &watermark_trigger, &overrun_trigger);
@@ -255,8 +271,7 @@ int main(int argc, char *argv[]) {
             printf("Delta: %f\n", time_delta_now(start_time));
         }
 
-        if((result>0) && (watermark_trigger>0)){
-            // printf("Delta: %f\n", time_delta_now(start_time));
+        if(watermark_trigger>0){
             for(int i=0; i<sampled_values; i++,delay_ms(0.006)){
                 buffer[0] = DATAX0;
                 result = spi_read(spi_handle, buffer, buffer, spi_buffer_size);
@@ -277,7 +292,12 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-        delay_ms(1000/(double)sample_rate);
+        if(samples_counter > 0){
+            save_data(output_name, time_data, x_data, y_data,
+                      z_data, samples_counter);
+            samples_counter = 0;
+        }
+        delay_ms(MS_PER_SECOND/(double)sample_rate);
     }
 
     printf("\nElapsed Time: %.6f seconds\n", time_delta_now(start_time));
@@ -286,15 +306,6 @@ int main(int argc, char *argv[]) {
     // Finishing SPI and GPIO
     spiClose(spi_handle);
     gpioTerminate();
-
-    // Save data
-    FILE * pFile;
-    pFile = fopen(output_name, "w");
-    fprintf(pFile, "time, x, y, z\n");
-    for(int i=0; i <= samples_counter; i++){
-        fprintf(pFile, "%.4f, %.4f, %.4f, %.4f\n", time_data[i], x_data[i], y_data[i], z_data[i]);
-    }
-    fclose(pFile);
 
     free(x_data);
     free(y_data);
