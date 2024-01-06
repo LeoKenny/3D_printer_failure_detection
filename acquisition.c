@@ -69,6 +69,13 @@ int spi_read(int spi_handle, char *command, char *buffer, int count){
     return spiXfer(spi_handle, command, buffer, count);
 }
 
+int spi_write(int spi_handle, char *buffer, int count){
+    if(count > 1){
+        buffer[0] |= (1 << multi_byte_bit);
+    }
+    return spiWrite(spi_handle, buffer, count);
+}
+
 void clear_fifo(int spi_handle){
     char command[2];
     char config = 0;
@@ -81,12 +88,12 @@ void clear_fifo(int spi_handle){
 
     // Clearing FIFO
     command[1] = 0;
-    spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
     delay_ms(10);
 
     // Getting old configuration back
     command[1] = config;
-    spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
 }
 
 int fifo_status(int spi_handle){
@@ -113,12 +120,12 @@ void configure_adxl(int spi_handle){
 
     // Set Data Format
     command[0] = DATA_FORMAT;
-    command[1] = 0x00;
+    command[1] = 0x08;
     // SELF_TEST | SPI | INT_INVERT | 0 | FULL_RES | Justify | Range |
-    //      0    |  0  |      0     | 0 |     0    |    0    |  0 0  |
+    //      0    |  0  |      0     | 0 |     1    |    0    |  0 0  |
     //     OFF   |4-wir|active high | 0 |  10-bit  | right-j | +- 2g |
     // (datasheet ADXL345, pg 27)
-    spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
     delay_ms(1);
 
     // Set Sample Rate
@@ -128,7 +135,7 @@ void configure_adxl(int spi_handle){
     // 0 | 0 | 0 |     0     | 1111
     // 0 | 0 | 0 |    OFF    | 3200Hz
     // (datasheet ADXL345, pg 25)
-    spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
     delay_ms(1);
 
     // Set interrupt pin map
@@ -138,18 +145,17 @@ void configure_adxl(int spi_handle){
     //      0     |      0     |      0     |     0    |      0     |     0     |     1     |    0
     //    INT1    |    INT1    |    INT1    |   INT1   |    INT1    |   INT1    |    INT2   |   INT1
     // (datasheet ADXL345, pg 26)
-    spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
     delay_ms(1);
 
     // FIFO Mode and Watermark sample size
     command[0] = FIFO_CTL;
     command[1] = 0xB0;
-    spiWrite(spi_handle, command, 2);
     // FIFO_MODE | Trigger | Samples
     //    1 0    |    1    | 1 0 0 0 0
     //  stream   |   INT2  | 16 samples
     // (datasheet ADXL345, pg 28)
-    // spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
     delay_ms(1);
 
     // Enable interrupt functions
@@ -159,7 +165,7 @@ void configure_adxl(int spi_handle){
     //      0     |      0     |      0     |     0    |      0     |     0     |     1     |    1
     //     off    |     off    |     off    |    off   |     off    |    off    | activated | activated
     // (datasheet ADXL345, pg 26);
-    spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
     delay_ms(1);
 
     // Set Power Mode
@@ -169,7 +175,7 @@ void configure_adxl(int spi_handle){
     // 0 | 0 |  0   |      0     |    1    |   0   |   0 0  |
     // 0 | 0 | conc | deactivated| active  | normal|   off  |
     // (datasheet ADXL345, pg 26)
-    spiWrite(spi_handle, command, 2);
+    spi_write(spi_handle, command, 2);
     delay_ms(1);
 }
 
@@ -206,40 +212,52 @@ void trigger_status(int spi_handle, int *watermark_trigger,int *overrun_trigger)
     *overrun_trigger = (buffer[1] & 0x01);
 }
 
-void save_data(char *output_name, double *time_data, double *x_data, double *y_data,
-              double *z_data, int samples_counter){
+void save_data(char *output_name, int samples_counter, int *overrun_data,
+               unsigned long int *number_data, double *block_time_data, double *sample_time_data,
+               double *x_data, double *y_data, double *z_data){
     // Save data
     FILE * pFile;
     pFile = fopen(output_name, "a");
-    for(int i=0; i <= samples_counter; i++){
-        fprintf(pFile, "%.4f, %.4f, %.4f, %.4f\n", time_data[i], x_data[i], y_data[i], z_data[i]);
+    for(int i=0; i < samples_counter; i++){
+        fprintf(pFile, "%ld, %.9f, %.9f, %d, %.9f, %.9f, %.9f\n",
+                number_data[i], block_time_data[i], sample_time_data[i],
+                overrun_data[i], x_data[i], y_data[i], z_data[i]);
     }
     fclose(pFile);
 }
 
 int main(int argc, char *argv[]) {
     char buffer[spi_buffer_size];
+    char command[spi_buffer_size];
     int spi_handle;
     int result, sampled_values, watermark_trigger, overrun_trigger;
-    int x, y, z, t;
-    double *time_data, *x_data, *y_data, *z_data;
+    double t_sample, t_block;
+    int x, y, z;
+    unsigned long int *number_data;
+    double *block_time_data, *sample_time_data;
+    int *overrun_data;
+    double *x_data, *y_data, *z_data;
     struct timespec start_time;
 
-    int samples_counter = 0;    // counter of samples
-    double sample_time = 5;       // sample time in seconds
-    int sample_rate = 3200;     // sample rate in Hz
+    int samples_counter = 0;                // counter of samples
+    double sample_time = 5;                 // sample time in seconds
+    int sample_rate = 3200;                 // sample rate in Hz
+    unsigned long int sample_number = 0;    // Samples total number to sort order
     char output_name[256] = "data.csv";
 
     // Allocate space for data
+    number_data = malloc(fifo_size * sizeof(unsigned long int));
+    overrun_data = malloc(fifo_size * sizeof(int));
     x_data = malloc(fifo_size * sizeof(double));
     y_data = malloc(fifo_size * sizeof(double));
     z_data = malloc(fifo_size * sizeof(double));
-    time_data = malloc(fifo_size * sizeof(double));
+    block_time_data = malloc(fifo_size * sizeof(double));
+    sample_time_data = malloc(fifo_size * sizeof(double));
 
     // Create Output file, and put header
     FILE * pFile;
     pFile = fopen(output_name, "w");
-    fprintf(pFile, "time, x, y, z\n");
+    fprintf(pFile, "sample_number, block_time, sample_time, overrun, x, y, z\n");
     fclose(pFile);
 
     // Starting GPIO
@@ -272,32 +290,40 @@ int main(int argc, char *argv[]) {
         }
 
         if(watermark_trigger>0){
+            t_block = time_delta_now(start_time);
             for(int i=0; i<sampled_values; i++,delay_ms(0.006)){
-                buffer[0] = DATAX0;
-                result = spi_read(spi_handle, buffer, buffer, spi_buffer_size);
+                command[0] = DATAX0;
+                result = spi_read(spi_handle, command, buffer, spi_buffer_size);
                 if(result < spi_buffer_size){
                     printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
                 }
                 else{
-                    x = (buffer[2]<<8)|buffer[1];
-                    y = (buffer[4]<<8)|buffer[3];
-                    z = (buffer[6]<<8)|buffer[5];
-                    t = time_delta_now(start_time);
+                    t_sample = time_delta_now(start_time);
+                    x = (buffer[2]<<8) | buffer[1];
+                    y = (buffer[4]<<8) | buffer[3];
+                    z = (buffer[6]<<8) | buffer[5];
 
-                    x_data[samples_counter] = x*conversion_const;
-                    y_data[samples_counter] = y*conversion_const;
-                    z_data[samples_counter] = z*conversion_const;
-                    time_data[samples_counter] = t;
-                    samples_counter+=1;
+                    number_data[samples_counter] = sample_number;
+                    block_time_data[samples_counter] = t_block;
+                    sample_time_data[samples_counter] = t_sample;
+                    overrun_data[samples_counter] = overrun_trigger;
+                    x_data[samples_counter] = x; //*conversion_const;
+                    y_data[samples_counter] = y; //*conversion_const;
+                    z_data[samples_counter] = z; //*conversion_const;
+
+                    samples_counter++;
+                    sample_number++;
+                    overrun_trigger = 0;
                 }
             }
         }
         if(samples_counter > 0){
-            save_data(output_name, time_data, x_data, y_data,
-                      z_data, samples_counter);
+            save_data(output_name, samples_counter, overrun_data,
+                      number_data, block_time_data, sample_time_data,
+                      x_data, y_data, z_data);
             samples_counter = 0;
         }
-        delay_ms(MS_PER_SECOND/(double)sample_rate);
+        delay_ms(MS_PER_SECOND/((double)sample_rate*2));
     }
 
     printf("\nElapsed Time: %.6f seconds\n", time_delta_now(start_time));
@@ -310,7 +336,10 @@ int main(int argc, char *argv[]) {
     free(x_data);
     free(y_data);
     free(z_data);
-    free(time_data);
+    free(number_data);
+    free(block_time_data);
+    free(sample_time_data);
+    free(overrun_data);
 
     printf("Done\n");
     return 0;
