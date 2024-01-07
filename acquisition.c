@@ -16,7 +16,7 @@
 #define DATAX0      0x32    // Data X0 register address
 #define FIFO_STATUS 0x39    // FIFO status register address
 
-const double conversion_const = 0.004;              // Max resolution, fixed to 4mg/LSB, pg 27
+const double conversion_const = (2.0*16.0)/8192;       // +-16g for 13 bits, pg 27
 const int rw_bit = 7;                               // Read/Write bit
 const int multi_byte_bit = 6;                       // Mutiple byte bit
 const int fifo_size = 33;                           // Max number of saved values, FIFO + last reading
@@ -122,16 +122,15 @@ void configure_adxl(int spi_handle){
     command[0] = DATA_FORMAT;
     command[1] = 0x0B;
     // SELF_TEST | SPI | INT_INVERT | 0 | FULL_RES | Justify | Range |
-    //      0    |  0  |      0     | 0 |     1    |    0    |  0 0  |
-    //     OFF   |4-wir|active high | 0 |  13-bit  | right-j | +- 2g |
+    //      0    |  0  |      0     | 0 |     1    |    0    |  1 1  |
+    //     OFF   |4-wir|active high | 0 |  13-bit  | right-j | +-16g |
     // (datasheet ADXL345, pg 27)
     spi_write(spi_handle, command, 2);
     delay_ms(1);
 
     // Set Sample Rate
     command[0] = BW_RATE;
-    // command[1] = 0x0F;
-    command[1] = 0x07;
+    command[1] = 0x0F;
     // 0 | 0 | 0 | LOW_POWER | Rate
     // 0 | 0 | 0 |     0     | 1111
     // 0 | 0 | 0 |    OFF    | 3200Hz
@@ -151,8 +150,7 @@ void configure_adxl(int spi_handle){
 
     // FIFO Mode and Watermark sample size
     command[0] = FIFO_CTL;
-    // command[1] = 0xB0;
-    command[1] = 0xA1;
+    command[1] = 0xB0;
     // FIFO_MODE | Trigger | Samples
     //    1 0    |    1    | 1 0 0 0 0
     //  stream   |   INT2  | 16 samples
@@ -228,45 +226,6 @@ void save_data(char *output_name, int samples_counter, int *overrun_data,
     fclose(pFile);
 }
 
-// int data_acquisition(struct timespec start_time, int sampled_values, int spi_handle,
-//                       int overrun_trigger,
-//                       unsigned long *sample_number,
-//                       unsigned long *number_data, int *overrun_data,
-//                       double *block_time_data, double *sample_time_data,
-//                       double *x_data, double *y_data, double *z_data){
-//     char command[8], buffer[8];
-//     int result;
-//     int samples_counter = 0;
-//     double x,y,z,t_block,t_sample;
-
-//     t_block = time_delta_now(start_time);
-//     for(int i=0; i<sampled_values; i++,delay_ms(0.006)){
-//         command[0] = DATAX0;
-//         result = spi_read(spi_handle, command, buffer, spi_buffer_size);
-//         if(result < spi_buffer_size){
-//             printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
-//         }
-//         else{
-//             t_sample = time_delta_now(start_time);
-//             x = (buffer[2]<<8) | buffer[1];
-//             y = (buffer[4]<<8) | buffer[3];
-//             z = (buffer[6]<<8) | buffer[5];
-
-//             number_data[samples_counter] = *sample_number;
-//             block_time_data[samples_counter] = t_block;
-//             sample_time_data[samples_counter] = t_sample;
-//             overrun_data[samples_counter] = overrun_trigger;
-//             x_data[samples_counter] = x; //*conversion_const;
-//             y_data[samples_counter] = y; //*conversion_const;
-//             z_data[samples_counter] = z; //*conversion_const;
-
-//             samples_counter++;
-//             *sample_number++;
-//         }
-//     }
-//     return samples_counter;
-// }
-
 int main(int argc, char *argv[]) {
     char buffer[spi_buffer_size];
     char command[spi_buffer_size];
@@ -281,7 +240,7 @@ int main(int argc, char *argv[]) {
     struct timespec start_time;
 
     int samples_counter = 0;                // counter of samples
-    double sample_time = 50;                 // sample time in seconds
+    double sample_time = 5;                 // sample time in seconds
     int sample_rate = 3200;                 // sample rate in Hz
     unsigned long int sample_number = 0;    // Samples total number to sort order
     char output_name[256] = "data.csv";
@@ -331,11 +290,6 @@ int main(int argc, char *argv[]) {
         }
 
         if(watermark_trigger>0){
-            // samples_counter = data_acquisition(start_time, sampled_values, spi_handle, overrun_trigger,
-            //                  &sample_number, &number_data, &overrun_data,
-            //                  &block_time_data, &sample_time_data,
-            //                  &x_data, &y_data, &z_data);
-            // overrun_trigger = 0;
             t_block = time_delta_now(start_time);
             for(int i=0; i<sampled_values; i++,delay_ms(0.006)){
                 command[0] = DATAX0;
@@ -353,11 +307,9 @@ int main(int argc, char *argv[]) {
                     block_time_data[samples_counter] = t_block;
                     sample_time_data[samples_counter] = t_sample;
                     overrun_data[samples_counter] = overrun_trigger;
-                    x_data[samples_counter] = x; //*conversion_const;
-                    y_data[samples_counter] = y; //*conversion_const;
-                    z_data[samples_counter] = z; //*conversion_const;
-
-                    printf("X: %f, Y: %f, Z: %f\n", x_data[samples_counter],y_data[samples_counter],z_data[samples_counter]);
+                    x_data[samples_counter] = (double)x * conversion_const;
+                    y_data[samples_counter] = (double)y * conversion_const;
+                    z_data[samples_counter] = (double)z * conversion_const;
 
                     samples_counter++;
                     sample_number++;
