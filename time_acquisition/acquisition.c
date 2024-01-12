@@ -22,7 +22,7 @@ const int multi_byte_bit = 6;                       // Mutiple byte bit
 const int fifo_size = 33;                           // Max number of saved values, FIFO + last reading
 
 // SPI comm configuration
-const int spi_speed = 2000000;                      // SPI communication speed, bps
+const int spi_speed = 5000000;                      // SPI communication speed, bps
 const int spi_channel = 0;                          // SPI communication channel
 const int spi_buffer_size = 7;                      // Communication buffer size
 const double delay_read = 0.006;                    // Delay for reading FIFO update
@@ -150,10 +150,10 @@ void configure_adxl(int spi_handle){
 
     // FIFO Mode and Watermark sample size
     command[0] = FIFO_CTL;
-    command[1] = 0xB0;
+    command[1] = 0xAA;
     // FIFO_MODE | Trigger | Samples
-    //    1 0    |    1    | 1 0 0 0 0
-    //  stream   |   INT2  | 16 samples
+    //    1 0    |    1    | 0 1 0 1 0
+    //  stream   |   INT2  | 10 samples
     // (datasheet ADXL345, pg 28)
     spi_write(spi_handle, command, 2);
     delay_ms(1);
@@ -240,7 +240,7 @@ int main(int argc, char *argv[]) {
     struct timespec start_time;
 
     int samples_counter = 0;                // counter of samples
-    double sample_time = 5;                 // sample time in seconds
+    double sample_time = 7000;              // sample time in seconds
     int sample_rate = 3200;                 // sample rate in Hz
     unsigned long int sample_number = 0;    // Samples total number to sort order
     char output_name[256] = "data.csv";
@@ -327,7 +327,7 @@ int main(int argc, char *argv[]) {
     }
 
     printf("\nElapsed Time: %.6f seconds\n", time_delta_now(start_time));
-    printf("Samples Quantity: %d\n", samples_counter);
+    printf("Samples Quantity: %ld\n", sample_number);
 
     // Finishing SPI and GPIO
     spiClose(spi_handle);
