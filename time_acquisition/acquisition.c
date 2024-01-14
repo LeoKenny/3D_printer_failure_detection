@@ -257,7 +257,7 @@ int main(int argc, char *argv[]) {
     // Create Output file, and put header
     FILE * pFile;
     pFile = fopen(output_name, "w");
-    fprintf(pFile, "sample_number, block_time, sample_time, overrun, x, y, z\n");
+    fprintf(pFile, "sample_number,block_time,sample_time,overrun,x,y,z\n");
     fclose(pFile);
 
     // Starting GPIO
