@@ -241,18 +241,19 @@ void trigger_status(int spi_handle, int *watermark_trigger,int *overrun_trigger)
     *overrun_trigger = (buffer[1] & 0x01);
 }
 
-void save_data(char *output_name, int samples_counter, int *overrun_data,
-               unsigned long int *number_data, double *block_time_data, double *sample_time_data,
-               double *x_data, double *y_data, double *z_data){
+void save_data(char *output_name, data_buffer buffer){
     // Save data
     FILE * pFile;
     pFile = fopen(output_name, "a");
-    for(int i=0; i < samples_counter; i++){
+    for(int i=0; i < buffer.samples_counter; i++){
         fprintf(pFile, "%ld, %.9f, %.9f, %d, %.9f, %.9f, %.9f\n",
-                number_data[i], block_time_data[i], sample_time_data[i],
-                overrun_data[i], x_data[i], y_data[i], z_data[i]);
+                buffer.number_data[i],
+                buffer.block_time_data[i], buffer.sample_time_data[i],
+                buffer.overrun_data[i],
+                buffer.x_data[i], buffer.y_data[i], buffer.z_data[i]);
     }
     fclose(pFile);
+    buffer.samples_counter = 0;
 }
 
 // void watermarkInterruptHandler(int gpio, int level, uint32_t tick, void * exData) {
@@ -299,7 +300,7 @@ void watermarkInterruptHandler(void * exData) {
 }
 
 int main(int argc, char *argv[]) {
-    int sampled_values, watermark_trigger, overrun_trigger;
+    int watermark_trigger, overrun_trigger;
     buffer_handler handler;
     double sample_time = 5;              // sample time in seconds
     int sample_rate = 3200;                 // sample rate in Hz
@@ -347,7 +348,7 @@ int main(int argc, char *argv[]) {
     clock_gettime(CLOCK_REALTIME, &(handler.start_time));
 
     while(time_delta_now(handler.start_time) < sample_time){
-        sampled_values = fifo_status(handler.spi_handle);
+        fifo_status(handler.spi_handle);
         trigger_status(handler.spi_handle, &watermark_trigger, &overrun_trigger);
         handler.overrun_trigger = overrun_trigger;
 
@@ -358,45 +359,12 @@ int main(int argc, char *argv[]) {
 
         if(watermark_trigger>0){
             watermarkInterruptHandler(&handler);
-            // t_block = time_delta_now(handler.start_time);
-            // for(int i=0; i<sampled_values; i++){
-            //     command[0] = DATAX0;
-            //     result = spi_read(spi_handle, command, buffer, spi_buffer_size);
-            //     if(result < spi_buffer_size){
-            //         printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
-            //     }
-            //     else{
-            //         t_sample = time_delta_now(handler.start_time);
-            //         x = (buffer[2]<<8) | buffer[1];
-            //         y = (buffer[4]<<8) | buffer[3];
-            //         z = (buffer[6]<<8) | buffer[5];
-
-            //         bufferA.number_data[bufferA.samples_counter] = sample_number;
-            //         bufferA.block_time_data[bufferA.samples_counter] = t_block;
-            //         bufferA.sample_time_data[bufferA.samples_counter] = t_sample;
-            //         bufferA.overrun_data[bufferA.samples_counter] = overrun_trigger;
-            //         bufferA.x_data[bufferA.samples_counter] = (double)x * conversion_const;
-            //         bufferA.y_data[bufferA.samples_counter] = (double)y * conversion_const;
-            //         bufferA.z_data[bufferA.samples_counter] = (double)z * conversion_const;
-
-            //         bufferA.samples_counter++;
-            //         sample_number++;
-            //         overrun_trigger = 0;
-            //     }
-            //     delay_ms(0.005);
-            // }
         }
-        if(handler.bufferA.samples_counter > 0){
+        if(handler.updated == 1){
             save_data(output_name,
-                      handler.bufferA.samples_counter,
-                      handler.bufferA.overrun_data,
-                      handler.bufferA.number_data,
-                      handler.bufferA.block_time_data,
-                      handler.bufferA.sample_time_data,
-                      handler.bufferA.x_data,
-                      handler.bufferA.y_data,
-                      handler.bufferA.z_data);
+                      handler.bufferA);
             handler.bufferA.samples_counter = 0;
+            handler.updated = 0;
         }
         delay_ms(MS_PER_SECOND/((double)sample_rate*2));
     }
