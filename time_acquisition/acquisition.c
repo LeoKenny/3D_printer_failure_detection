@@ -3,6 +3,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <pthread.h>
 #include <pigpio.h>
 
 // ADXL345 registers
@@ -15,6 +16,7 @@
 #define FIFO_CTL    0x38    // FIFO mode register address
 #define DATAX0      0x32    // Data X0 register address
 #define FIFO_STATUS 0x39    // FIFO status register address
+#define WATERMARK_SIZE 16   // Watermark sample size
 
 const double conversion_const = (2.0*16.0)/8192;       // +-16g for 13 bits, pg 27
 const int rw_bit = 7;                               // Read/Write bit
@@ -27,6 +29,10 @@ const int spi_channel = 0;                          // SPI communication channel
 const int spi_buffer_size = 7;                      // Communication buffer size
 const double delay_read = 0.006;                    // Delay for reading FIFO update
 
+// Buffer handling
+pthread_mutex_t bufferAMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t bufferBMutex = PTHREAD_MUTEX_INITIALIZER;
+
 typedef struct data_buffer {
     int samples_counter;
     unsigned long int * number_data;
@@ -37,6 +43,18 @@ typedef struct data_buffer {
     double * block_time_data;
     double * sample_time_data;
 } data_buffer;
+
+typedef struct buffer_handler{
+    struct timespec start_time;
+    int overrun_trigger;
+    data_buffer bufferA;
+    // data_buffer bufferB;
+    unsigned long int sample_number_A;    // Samples total number to sort order
+    // unsigned long int sample_number_B;    // Samples total number to sort order
+    // int racing;         // Indicates the racing condition happened
+    int updated;        // Indicates a new reading have been done
+    int spi_handle;
+} buffer_handler;
 
 enum { NS_PER_SECOND = 1000000000,
        MS_PER_NS = 1000000,
@@ -161,10 +179,10 @@ void configure_adxl(int spi_handle){
 
     // FIFO Mode and Watermark sample size
     command[0] = FIFO_CTL;
-    command[1] = 0xAA;
+    command[1] = 0xA0 | WATERMARK_SIZE;
     // FIFO_MODE | Trigger | Samples
-    //    1 0    |    1    | 0 0 0 1 1
-    //  stream   |   INT2  | 10 samples
+    //    1 0    |    1    | x x x x x
+    //  stream   |   INT2  | x samples
     // (datasheet ADXL345, pg 28)
     spi_write(spi_handle, command, 2);
     delay_ms(1);
@@ -237,18 +255,54 @@ void save_data(char *output_name, int samples_counter, int *overrun_data,
     fclose(pFile);
 }
 
-int main(int argc, char *argv[]) {
-    char buffer[spi_buffer_size];
+// void watermarkInterruptHandler(int gpio, int level, uint32_t tick, void * exData) {
+void watermarkInterruptHandler(void * exData) {
+    char spi_buffer[spi_buffer_size];
     char command[spi_buffer_size];
-    int spi_handle;
-    int result, sampled_values, watermark_trigger, overrun_trigger;
-    double t_sample, t_block;
     int16_t x, y, z;
-    struct timespec start_time;
+    int result;
+    double t_sample;
+    double t_block;
 
+    buffer_handler *handler = (buffer_handler *)exData;
+
+    t_block = time_delta_now(handler->start_time);
+    pthread_mutex_lock(&bufferAMutex);
+
+    for(int i=0; i<WATERMARK_SIZE; i++){
+        command[0] = DATAX0;
+        result = spi_read(handler->spi_handle, command, spi_buffer, spi_buffer_size);
+        if(result < spi_buffer_size){
+            printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
+        }
+        else{
+            t_sample = time_delta_now(handler->start_time);
+            x = (spi_buffer[2]<<8) | spi_buffer[1];
+            y = (spi_buffer[4]<<8) | spi_buffer[3];
+            z = (spi_buffer[6]<<8) | spi_buffer[5];
+
+            handler->bufferA.number_data[handler->bufferA.samples_counter] = handler->sample_number_A;
+            handler->bufferA.block_time_data[handler->bufferA.samples_counter] = t_block;
+            handler->bufferA.sample_time_data[handler->bufferA.samples_counter] = t_sample;
+            handler->bufferA.overrun_data[handler->bufferA.samples_counter] = handler->overrun_trigger;
+            handler->bufferA.x_data[handler->bufferA.samples_counter] = (double)x * conversion_const;
+            handler->bufferA.y_data[handler->bufferA.samples_counter] = (double)y * conversion_const;
+            handler->bufferA.z_data[handler->bufferA.samples_counter] = (double)z * conversion_const;
+
+            handler->bufferA.samples_counter++;
+            handler->sample_number_A++;
+        }
+        delay_ms(0.005);
+    }
+    handler->updated = 1;
+    pthread_mutex_unlock(&bufferAMutex);
+}
+
+int main(int argc, char *argv[]) {
+    int sampled_values, watermark_trigger, overrun_trigger;
+    buffer_handler handler;
     double sample_time = 5;              // sample time in seconds
     int sample_rate = 3200;                 // sample rate in Hz
-    unsigned long int sample_number = 0;    // Samples total number to sort order
     char output_name[256] = "data.csv";
 
     // Allocate space for data
@@ -262,6 +316,7 @@ int main(int argc, char *argv[]) {
         malloc(fifo_size * sizeof(double)),             // block_time_data
         malloc(fifo_size * sizeof(double)),             // sample_time_data
     };
+    handler.bufferA = bufferA;
 
     // Create Output file, and put header
     FILE * pFile;
@@ -276,77 +331,81 @@ int main(int argc, char *argv[]) {
     }
 
     // Starting SPI
-    spi_handle = spiOpen(spi_channel, spi_speed, 3);
-    if(verify_spi(spi_handle) < 0){ return 1; }
+    handler.spi_handle = spiOpen(spi_channel, spi_speed, 3);
+    if(verify_spi(handler.spi_handle) < 0){ return 1; }
 
-    configure_adxl(spi_handle);
+    configure_adxl(handler.spi_handle);
 
     // Starting acquisition
     printf("Sample Time: %.6f seconds\n",sample_time);
 
-    clear_fifo_forced(spi_handle);
+    handler.updated = 0;
+    handler.sample_number_A = 0;
+    clear_fifo_forced(handler.spi_handle);
     delay_ms(1/(double)sample_rate);
 
-    clock_gettime(CLOCK_REALTIME, &start_time);
+    clock_gettime(CLOCK_REALTIME, &(handler.start_time));
 
-    while(time_delta_now(start_time) < sample_time){
-        sampled_values = fifo_status(spi_handle);
-        trigger_status(spi_handle, &watermark_trigger, &overrun_trigger);
+    while(time_delta_now(handler.start_time) < sample_time){
+        sampled_values = fifo_status(handler.spi_handle);
+        trigger_status(handler.spi_handle, &watermark_trigger, &overrun_trigger);
+        handler.overrun_trigger = overrun_trigger;
 
         if(overrun_trigger){
             printf("Overrun!");
-            printf("Delta: %f\n", time_delta_now(start_time));
+            printf("Delta: %f\n", time_delta_now(handler.start_time));
         }
 
         if(watermark_trigger>0){
-            t_block = time_delta_now(start_time);
-            for(int i=0; i<sampled_values; i++){
-                command[0] = DATAX0;
-                result = spi_read(spi_handle, command, buffer, spi_buffer_size);
-                if(result < spi_buffer_size){
-                    printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
-                }
-                else{
-                    t_sample = time_delta_now(start_time);
-                    x = (buffer[2]<<8) | buffer[1];
-                    y = (buffer[4]<<8) | buffer[3];
-                    z = (buffer[6]<<8) | buffer[5];
+            watermarkInterruptHandler(&handler);
+            // t_block = time_delta_now(handler.start_time);
+            // for(int i=0; i<sampled_values; i++){
+            //     command[0] = DATAX0;
+            //     result = spi_read(spi_handle, command, buffer, spi_buffer_size);
+            //     if(result < spi_buffer_size){
+            //         printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
+            //     }
+            //     else{
+            //         t_sample = time_delta_now(handler.start_time);
+            //         x = (buffer[2]<<8) | buffer[1];
+            //         y = (buffer[4]<<8) | buffer[3];
+            //         z = (buffer[6]<<8) | buffer[5];
 
-                    bufferA.number_data[bufferA.samples_counter] = sample_number;
-                    bufferA.block_time_data[bufferA.samples_counter] = t_block;
-                    bufferA.sample_time_data[bufferA.samples_counter] = t_sample;
-                    bufferA.overrun_data[bufferA.samples_counter] = overrun_trigger;
-                    bufferA.x_data[bufferA.samples_counter] = (double)x * conversion_const;
-                    bufferA.y_data[bufferA.samples_counter] = (double)y * conversion_const;
-                    bufferA.z_data[bufferA.samples_counter] = (double)z * conversion_const;
+            //         bufferA.number_data[bufferA.samples_counter] = sample_number;
+            //         bufferA.block_time_data[bufferA.samples_counter] = t_block;
+            //         bufferA.sample_time_data[bufferA.samples_counter] = t_sample;
+            //         bufferA.overrun_data[bufferA.samples_counter] = overrun_trigger;
+            //         bufferA.x_data[bufferA.samples_counter] = (double)x * conversion_const;
+            //         bufferA.y_data[bufferA.samples_counter] = (double)y * conversion_const;
+            //         bufferA.z_data[bufferA.samples_counter] = (double)z * conversion_const;
 
-                    bufferA.samples_counter++;
-                    sample_number++;
-                    overrun_trigger = 0;
-                }
-                delay_ms(0.005);
-            }
+            //         bufferA.samples_counter++;
+            //         sample_number++;
+            //         overrun_trigger = 0;
+            //     }
+            //     delay_ms(0.005);
+            // }
         }
-        if(bufferA.samples_counter > 0){
+        if(handler.bufferA.samples_counter > 0){
             save_data(output_name,
-                      bufferA.samples_counter,
-                      bufferA.overrun_data,
-                      bufferA.number_data,
-                      bufferA.block_time_data,
-                      bufferA.sample_time_data,
-                      bufferA.x_data,
-                      bufferA.y_data,
-                      bufferA.z_data);
-            bufferA.samples_counter = 0;
+                      handler.bufferA.samples_counter,
+                      handler.bufferA.overrun_data,
+                      handler.bufferA.number_data,
+                      handler.bufferA.block_time_data,
+                      handler.bufferA.sample_time_data,
+                      handler.bufferA.x_data,
+                      handler.bufferA.y_data,
+                      handler.bufferA.z_data);
+            handler.bufferA.samples_counter = 0;
         }
         delay_ms(MS_PER_SECOND/((double)sample_rate*2));
     }
 
-    printf("\nElapsed Time: %.6f seconds\n", time_delta_now(start_time));
-    printf("Samples Quantity: %ld\n", sample_number);
+    printf("\nElapsed Time: %.6f seconds\n", time_delta_now(handler.start_time));
+    printf("Samples Quantity: %ld\n", handler.sample_number_A);
 
     // Finishing SPI and GPIO
-    spiClose(spi_handle);
+    spiClose(handler.spi_handle);
     gpioTerminate();
 
     free(bufferA.x_data);
