@@ -27,6 +27,17 @@ const int spi_channel = 0;                          // SPI communication channel
 const int spi_buffer_size = 7;                      // Communication buffer size
 const double delay_read = 0.006;                    // Delay for reading FIFO update
 
+typedef struct data_buffer {
+    int samples_counter;
+    unsigned long int * number_data;
+    int * overrun_data;
+    double * x_data;
+    double * y_data;
+    double * z_data;
+    double * block_time_data;
+    double * sample_time_data;
+} data_buffer;
+
 enum { NS_PER_SECOND = 1000000000,
        MS_PER_NS = 1000000,
        MS_PER_SECOND = 1000
@@ -152,7 +163,7 @@ void configure_adxl(int spi_handle){
     command[0] = FIFO_CTL;
     command[1] = 0xAA;
     // FIFO_MODE | Trigger | Samples
-    //    1 0    |    1    | 0 1 0 1 0
+    //    1 0    |    1    | 0 0 0 1 1
     //  stream   |   INT2  | 10 samples
     // (datasheet ADXL345, pg 28)
     spi_write(spi_handle, command, 2);
@@ -233,26 +244,24 @@ int main(int argc, char *argv[]) {
     int result, sampled_values, watermark_trigger, overrun_trigger;
     double t_sample, t_block;
     int16_t x, y, z;
-    unsigned long int *number_data;
-    double *block_time_data, *sample_time_data;
-    int *overrun_data;
-    double *x_data, *y_data, *z_data;
     struct timespec start_time;
 
-    int samples_counter = 0;                // counter of samples
-    double sample_time = 7000;              // sample time in seconds
+    double sample_time = 5;              // sample time in seconds
     int sample_rate = 3200;                 // sample rate in Hz
     unsigned long int sample_number = 0;    // Samples total number to sort order
     char output_name[256] = "data.csv";
 
     // Allocate space for data
-    number_data = malloc(fifo_size * sizeof(unsigned long int));
-    overrun_data = malloc(fifo_size * sizeof(int));
-    x_data = malloc(fifo_size * sizeof(double));
-    y_data = malloc(fifo_size * sizeof(double));
-    z_data = malloc(fifo_size * sizeof(double));
-    block_time_data = malloc(fifo_size * sizeof(double));
-    sample_time_data = malloc(fifo_size * sizeof(double));
+    data_buffer bufferA = {
+        0, // samples_counter
+        malloc(fifo_size * sizeof(unsigned long int)),  // number_data
+        malloc(fifo_size * sizeof(int)),                // overrun_data
+        malloc(fifo_size * sizeof(double)),             // x_data
+        malloc(fifo_size * sizeof(double)),             // y_data
+        malloc(fifo_size * sizeof(double)),             // z_data
+        malloc(fifo_size * sizeof(double)),             // block_time_data
+        malloc(fifo_size * sizeof(double)),             // sample_time_data
+    };
 
     // Create Output file, and put header
     FILE * pFile;
@@ -291,7 +300,7 @@ int main(int argc, char *argv[]) {
 
         if(watermark_trigger>0){
             t_block = time_delta_now(start_time);
-            for(int i=0; i<sampled_values; i++,delay_ms(0.006)){
+            for(int i=0; i<sampled_values; i++){
                 command[0] = DATAX0;
                 result = spi_read(spi_handle, command, buffer, spi_buffer_size);
                 if(result < spi_buffer_size){
@@ -303,25 +312,32 @@ int main(int argc, char *argv[]) {
                     y = (buffer[4]<<8) | buffer[3];
                     z = (buffer[6]<<8) | buffer[5];
 
-                    number_data[samples_counter] = sample_number;
-                    block_time_data[samples_counter] = t_block;
-                    sample_time_data[samples_counter] = t_sample;
-                    overrun_data[samples_counter] = overrun_trigger;
-                    x_data[samples_counter] = (double)x * conversion_const;
-                    y_data[samples_counter] = (double)y * conversion_const;
-                    z_data[samples_counter] = (double)z * conversion_const;
+                    bufferA.number_data[bufferA.samples_counter] = sample_number;
+                    bufferA.block_time_data[bufferA.samples_counter] = t_block;
+                    bufferA.sample_time_data[bufferA.samples_counter] = t_sample;
+                    bufferA.overrun_data[bufferA.samples_counter] = overrun_trigger;
+                    bufferA.x_data[bufferA.samples_counter] = (double)x * conversion_const;
+                    bufferA.y_data[bufferA.samples_counter] = (double)y * conversion_const;
+                    bufferA.z_data[bufferA.samples_counter] = (double)z * conversion_const;
 
-                    samples_counter++;
+                    bufferA.samples_counter++;
                     sample_number++;
                     overrun_trigger = 0;
                 }
+                delay_ms(0.005);
             }
         }
-        if(samples_counter > 0){
-            save_data(output_name, samples_counter, overrun_data,
-                      number_data, block_time_data, sample_time_data,
-                      x_data, y_data, z_data);
-            samples_counter = 0;
+        if(bufferA.samples_counter > 0){
+            save_data(output_name,
+                      bufferA.samples_counter,
+                      bufferA.overrun_data,
+                      bufferA.number_data,
+                      bufferA.block_time_data,
+                      bufferA.sample_time_data,
+                      bufferA.x_data,
+                      bufferA.y_data,
+                      bufferA.z_data);
+            bufferA.samples_counter = 0;
         }
         delay_ms(MS_PER_SECOND/((double)sample_rate*2));
     }
@@ -333,13 +349,13 @@ int main(int argc, char *argv[]) {
     spiClose(spi_handle);
     gpioTerminate();
 
-    free(x_data);
-    free(y_data);
-    free(z_data);
-    free(number_data);
-    free(block_time_data);
-    free(sample_time_data);
-    free(overrun_data);
+    free(bufferA.x_data);
+    free(bufferA.y_data);
+    free(bufferA.z_data);
+    free(bufferA.number_data);
+    free(bufferA.block_time_data);
+    free(bufferA.sample_time_data);
+    free(bufferA.overrun_data);
 
     printf("Done\n");
     return 0;
