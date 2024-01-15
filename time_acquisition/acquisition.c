@@ -24,7 +24,7 @@
 const double conversion_const = (2.0*16.0)/8192;    // +-16g for 13 bits, pg 27
 const int rw_bit = 7;                               // Read/Write bit
 const int multi_byte_bit = 6;                       // Mutiple byte bit
-const int fifo_size = 33;                           // Max number of saved values, FIFO + last reading
+const int fifo_size = 50;                           // Max number of saved values, FIFO(32) + extra space
 
 // SPI comm configuration
 const int spi_speed = 5000000;                      // SPI communication speed, bps
@@ -135,7 +135,7 @@ int fifo_status(int spi_handle){
     buffer[0] = FIFO_STATUS;
     spi_read(spi_handle, buffer, buffer, 2);
 
-    return buffer[1] & 0x3F;
+    return (int)(buffer[1] & 0x3F);
 }
 
 void clear_fifo_forced(int spi_handle){
@@ -259,14 +259,48 @@ void save_data(char *output_name, data_buffer buffer){
     fclose(pFile);
 }
 
+void save_FIFO_values(buffer_handler *handler, data_buffer *buffer, int sampled_values, double t_block){
+    char spi_buffer[spi_buffer_size];
+    char command[spi_buffer_size];
+    double t_sample;
+    int16_t x, y, z;
+    int result;
+
+    for(int i=0; i<sampled_values; i++){
+        command[0] = DATAX0;
+        result = spi_read(handler->spi_handle, command, spi_buffer, spi_buffer_size);
+        if(result < spi_buffer_size){
+            printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
+        }
+        else{
+            t_sample = time_delta_now(handler->start_time);
+            x = (spi_buffer[2]<<8) | spi_buffer[1];
+            y = (spi_buffer[4]<<8) | spi_buffer[3];
+            z = (spi_buffer[6]<<8) | spi_buffer[5];
+
+            buffer->number_data[buffer->samples_counter] = handler->sample_number;
+            buffer->block_time_data[buffer->samples_counter] = t_block;
+            buffer->sample_time_data[buffer->samples_counter] = t_sample;
+            buffer->overrun_data[buffer->samples_counter] = 0;
+            buffer->x_data[buffer->samples_counter] = (double)x * conversion_const;
+            buffer->y_data[buffer->samples_counter] = (double)y * conversion_const;
+            buffer->z_data[buffer->samples_counter] = (double)z * conversion_const;
+
+            buffer->samples_counter = buffer->samples_counter + 1;
+            handler->sample_number = handler->sample_number + 1;
+        }
+        delay_ms(0.005);
+    }
+}
+
 void watermarkInterruptHandler(int gpio, int level, uint32_t tick, void * exData) {
-// void watermarkInterruptHandler(void * exData) {
     char spi_buffer[spi_buffer_size];
     char command[spi_buffer_size];
     int16_t x, y, z;
     int result;
     double t_sample,t_block;
     int selected;                   // Selected buffer
+    int sampled_values;
 
     buffer_handler *handler = (buffer_handler *)exData;
     t_block = time_delta_now(handler->start_time);
@@ -286,89 +320,26 @@ void watermarkInterruptHandler(int gpio, int level, uint32_t tick, void * exData
     else return;
 
     if (selected == 1){
-        for(int i=0; i<WATERMARK_SIZE; i++){
-            command[0] = DATAX0;
-            result = spi_read(handler->spi_handle, command, spi_buffer, spi_buffer_size);
-            if(result < spi_buffer_size){
-                printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
-            }
-            else{
-                t_sample = time_delta_now(handler->start_time);
-                x = (spi_buffer[2]<<8) | spi_buffer[1];
-                y = (spi_buffer[4]<<8) | spi_buffer[3];
-                z = (spi_buffer[6]<<8) | spi_buffer[5];
-
-                handler->bufferA.number_data[handler->bufferA.samples_counter] = handler->sample_number;
-                handler->bufferA.block_time_data[handler->bufferA.samples_counter] = t_block;
-                handler->bufferA.sample_time_data[handler->bufferA.samples_counter] = t_sample;
-                handler->bufferA.overrun_data[handler->bufferA.samples_counter] = 0;
-                handler->bufferA.x_data[handler->bufferA.samples_counter] = (double)x * conversion_const;
-                handler->bufferA.y_data[handler->bufferA.samples_counter] = (double)y * conversion_const;
-                handler->bufferA.z_data[handler->bufferA.samples_counter] = (double)z * conversion_const;
-
-                handler->bufferA.samples_counter = handler->bufferA.samples_counter + 1;
-                handler->sample_number = handler->sample_number + 1;
-            }
-            delay_ms(0.005);
-        }
+        save_FIFO_values(handler, &handler->bufferA, WATERMARK_SIZE, t_block);
+        delay_ms(0.006);
+        sampled_values = fifo_status(handler->spi_handle);
+        save_FIFO_values(handler, &handler->bufferA, sampled_values, t_block);
         pthread_mutex_unlock(&bufferAMutex);
         handler->updated_A = 1;
     }
     if (selected == 2){
-        for(int i=0; i<WATERMARK_SIZE; i++){
-            command[0] = DATAX0;
-            result = spi_read(handler->spi_handle, command, spi_buffer, spi_buffer_size);
-            if(result < spi_buffer_size){
-                printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
-            }
-            else{
-                t_sample = time_delta_now(handler->start_time);
-                x = (spi_buffer[2]<<8) | spi_buffer[1];
-                y = (spi_buffer[4]<<8) | spi_buffer[3];
-                z = (spi_buffer[6]<<8) | spi_buffer[5];
-
-                handler->bufferB.number_data[handler->bufferB.samples_counter] = (handler->sample_number);
-                handler->bufferB.block_time_data[handler->bufferB.samples_counter] = t_block;
-                handler->bufferB.sample_time_data[handler->bufferB.samples_counter] = t_sample;
-                handler->bufferB.overrun_data[handler->bufferB.samples_counter] = 0;
-                handler->bufferB.x_data[handler->bufferB.samples_counter] = (double)x * conversion_const;
-                handler->bufferB.y_data[handler->bufferB.samples_counter] = (double)y * conversion_const;
-                handler->bufferB.z_data[handler->bufferB.samples_counter] = (double)z * conversion_const;
-
-                handler->bufferB.samples_counter = handler->bufferB.samples_counter + 1;
-                handler->sample_number = handler->sample_number + 1;
-            }
-            delay_ms(0.005);
-        }
+        save_FIFO_values(handler, &handler->bufferB, WATERMARK_SIZE, t_block);
+        delay_ms(0.006);
+        sampled_values = fifo_status(handler->spi_handle);
+        save_FIFO_values(handler, &handler->bufferB, sampled_values, t_block);
         pthread_mutex_unlock(&bufferBMutex);
         handler->updated_B = 1;
     }
     if (selected == 3){
-        for(int i=0; i<WATERMARK_SIZE; i++){
-            command[0] = DATAX0;
-            result = spi_read(handler->spi_handle, command, spi_buffer, spi_buffer_size);
-            if(result < spi_buffer_size){
-                printf("Buffer read size {%d} is smaller than expected {%d}.\n", result, spi_buffer_size);
-            }
-            else{
-                t_sample = time_delta_now(handler->start_time);
-                x = (spi_buffer[2]<<8) | spi_buffer[1];
-                y = (spi_buffer[4]<<8) | spi_buffer[3];
-                z = (spi_buffer[6]<<8) | spi_buffer[5];
-
-                handler->bufferC.number_data[handler->bufferC.samples_counter] = (handler->sample_number);
-                handler->bufferC.block_time_data[handler->bufferC.samples_counter] = t_block;
-                handler->bufferC.sample_time_data[handler->bufferC.samples_counter] = t_sample;
-                handler->bufferC.overrun_data[handler->bufferC.samples_counter] = 0;
-                handler->bufferC.x_data[handler->bufferC.samples_counter] = (double)x * conversion_const;
-                handler->bufferC.y_data[handler->bufferC.samples_counter] = (double)y * conversion_const;
-                handler->bufferC.z_data[handler->bufferC.samples_counter] = (double)z * conversion_const;
-
-                handler->bufferC.samples_counter = handler->bufferC.samples_counter + 1;
-                handler->sample_number = handler->sample_number + 1;
-            }
-            delay_ms(0.005);
-        }
+        save_FIFO_values(handler, &handler->bufferC, WATERMARK_SIZE, t_block);
+        delay_ms(0.006);
+        sampled_values = fifo_status(handler->spi_handle);
+        save_FIFO_values(handler, &handler->bufferC, sampled_values, t_block);
         pthread_mutex_unlock(&bufferCMutex);
         handler->updated_C = 1;
     }
