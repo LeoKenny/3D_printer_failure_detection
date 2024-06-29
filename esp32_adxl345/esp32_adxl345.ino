@@ -1,9 +1,8 @@
 #include <SPI.h>
-// Ctrl + T for autoformat
-#define CS 5  // Chip select
-// AND W ADDR
+#define CS 5
 #define WRITEBYTE 0x00
 #define READBYTE 0x80
+#define MULTIBYTE 0x40
 #define DATAX0 0x32
 #define DATAX1 0x33
 #define DATAY0 0x34
@@ -40,28 +39,41 @@ uint8_t registerRead(byte Address) {
   return data;
 }
 
+void multipleRegisterRead(byte Address, uint8_t *data) {
+  SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE3));
+  digitalWrite(CS, LOW);
+  SPI.transfer(Address | READBYTE | MULTIBYTE);
+  data[0] = SPI.transfer(0);
+  data[1] = SPI.transfer(0);
+  digitalWrite(CS, HIGH);
+  SPI.endTransaction();
+}
+
 void setup() {
   initialise();
   registerWrite(0x31, 0x0F);            // Enter 4-wire SPI mode, left justified, full resolution, 16g+- range
-  Serial.print("Reg0x31: ");
-  Serial.println(registerRead(0x31));
-  Serial.print("DEVICE ID: ");
-  Serial.println(registerRead(0x00));
   registerWrite(0x2C, 0x06);            // Hz:6.25 - Power Mode: Normal
   registerWrite(0x2D, 0x08);            // Exit standby mode
 }
 
 float acceleration(byte Address) {
-  int16_t DATAn = registerRead(Address + 1) << 8;   // Hi
-  DATAn |= registerRead(Address);                   // Lo
+  uint8_t data[2];
+  multipleRegisterRead(Address, data);
+  int16_t DATAn = data[1] << 8;  // Hi
+  DATAn |= data[0];          // Lo
   DATAn = DATAn >> 3;
-  return DATAn;
+  Serial.print(data[0],BIN);
+  Serial.print(" - ");
+  Serial.print(data[1],BIN);
+  Serial.print(" - ");
+  Serial.print(DATAn);
+  Serial.print(" - ");
+  float nAccel = (float)DATAn / 256.0;
+  nAccel = nAccel*9.807;
+  return nAccel;
 }
 
 void loop() {
   Serial.println(acceleration(0x36));
   delay(1000);
 }
-
-
-// Shouldnt max accel be 1g?
