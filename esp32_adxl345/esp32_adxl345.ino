@@ -39,12 +39,13 @@ uint8_t registerRead(byte Address) {
   return data;
 }
 
-void multipleRegisterRead(byte Address, uint8_t *data) {
+void multipleRegisterRead(byte Address, int8_t *data, byte size) {
   SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE3));
   digitalWrite(CS, LOW);
   SPI.transfer(Address | READBYTE | MULTIBYTE);
-  data[0] = SPI.transfer(0);
-  data[1] = SPI.transfer(0);
+  for(byte i=0; i<size;i++){
+    data[i] = SPI.transfer(0);
+  }
   digitalWrite(CS, HIGH);
   SPI.endTransaction();
 }
@@ -56,24 +57,23 @@ void setup() {
   registerWrite(0x2D, 0x08);            // Exit standby mode
 }
 
-float acceleration(byte Address) {
-  uint8_t data[2];
-  multipleRegisterRead(Address, data);
-  int16_t DATAn = data[1] << 8;  // Hi
-  DATAn |= data[0];          // Lo
-  DATAn = DATAn >> 3;
-  Serial.print(data[0],BIN);
-  Serial.print(" - ");
-  Serial.print(data[1],BIN);
-  Serial.print(" - ");
-  Serial.print(DATAn);
-  Serial.print(" - ");
-  float nAccel = (float)DATAn / 256.0;
-  nAccel = nAccel*9.807;
-  return nAccel;
+void acceleration(int16_t* accel_x, int16_t *accel_y, int16_t *accel_z) {
+  int8_t data[6];
+  multipleRegisterRead(DATAX0, data, 6);
+  *accel_x = (data[1] << 5) | (data[0] >> 3);
+  *accel_y = (data[3] << 5) | (data[2] >> 3);
+  *accel_z = (data[5] << 5) | (data[4] >> 3);
 }
 
 void loop() {
-  Serial.println(acceleration(0x36));
-  delay(1000);
+  int16_t accel_x=0;
+  int16_t accel_y=0;
+  int16_t accel_z=0;
+  acceleration(&accel_x, &accel_y, &accel_z);
+  Serial.print(accel_x/256.0 * 9.807);
+  Serial.print(" - ");
+  Serial.print(accel_y/256.0 * 9.807);
+  Serial.print(" - ");
+  Serial.println(accel_z/256.0 * 9.807);
+  delay(100);
 }
