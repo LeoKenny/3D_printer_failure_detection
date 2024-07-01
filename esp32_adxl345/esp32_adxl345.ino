@@ -8,9 +8,14 @@
 #define DATAY0 0x34
 #define DATAY1 0x35
 #define DATAZ0 0x36
-#define DATAZ1 0x37
+#define GPIO_INT1 2
+#define GPIO_INT2 4
+#define WATERMARK_SIZE 16
 
-void initialise() {
+bool watermark_interrupt = false;
+bool overflow_interrupt = false;
+
+void initialize_comm() {
   Serial.begin(115200);
   SPI.begin();
   pinMode(CS, OUTPUT);
@@ -18,6 +23,12 @@ void initialise() {
   while (!Serial)
     ;
   Serial.println("Initialized");
+}
+
+void initialize_ADXL(){
+  registerWrite(0x31, 0x0F);            // Enter 4-wire SPI mode, left justified, full resolution, 16g+- range
+  registerWrite(0x2C, 0x06);            // Hz:6.25 - Power Mode: Normal
+  registerWrite(0x2D, 0x08);            // Exit standby mode
 }
 
 void registerWrite(byte Address, byte data) {
@@ -50,11 +61,27 @@ void multipleRegisterRead(byte Address, int8_t *data, byte size) {
   SPI.endTransaction();
 }
 
+void IRAM_ATTR ISR_watermark(){
+  watermark_interrupt = true;
+}
+
+void IRAM_ATTR ISR_overflow(){
+  overflow_interrupt = true;
+}
+
 void setup() {
-  initialise();
-  registerWrite(0x31, 0x0F);            // Enter 4-wire SPI mode, left justified, full resolution, 16g+- range
-  registerWrite(0x2C, 0x06);            // Hz:6.25 - Power Mode: Normal
-  registerWrite(0x2D, 0x08);            // Exit standby mode
+  pinMode(GPIO_INT1, INPUT);            // Config INT1 PIN as input
+  attachInterrupt(GPIO_INT1,            // Pin for the interruption
+                  ISR_watermark,        // Function for ISR 
+                  RISING);              // Config to rising signal
+
+  pinMode(GPIO_INT2, INPUT);            // Config INT2 PIN as input
+  attachInterrupt(GPIO_INT2,            // Pin for the interruption
+                  ISR_overflow,         // Function for ISR 
+                  RISING);
+
+  initialize_comm();
+  initialize_ADXL();
 }
 
 void acceleration(int16_t* accel_x, int16_t *accel_y, int16_t *accel_z) {
@@ -69,11 +96,10 @@ void loop() {
   int16_t accel_x=0;
   int16_t accel_y=0;
   int16_t accel_z=0;
-  acceleration(&accel_x, &accel_y, &accel_z);
-  Serial.print(accel_x/256.0 * 9.807);
-  Serial.print(" - ");
-  Serial.print(accel_y/256.0 * 9.807);
-  Serial.print(" - ");
-  Serial.println(accel_z/256.0 * 9.807);
-  delay(100);
+  if (watermark_interrupt){
+    acceleration(&accel_x, &accel_y, &accel_z);
+    Serial.println(accel_x);
+    watermark_interrupt = false;
+  }
+  delay(500);
 }
