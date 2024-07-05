@@ -15,11 +15,17 @@
 #define FIFO_CTL 0x38
 #define FIFO_STATUS 0x39
 
-#define CS 5
-#define GPIO_INT1 2
-#define GPIO_INT2 4
+#define GPIO_WATERMARK 21
+#define GPIO_OVERRUN 22
 
 #define WATERMARK_SIZE 16
+#define FIFO_SIZE 32
+
+// Initialize SPI pins
+#define ADXL345_CS          5
+#define ADXL345_SCK         18
+#define ADXL345_MOSI        23
+#define ADXL345_MISO        19
 
 bool watermark_interrupt = false;
 bool overflow_interrupt = false;
@@ -44,8 +50,9 @@ fifo_accel fifo = {{0},{0},{0},0};
 void initialize_comm() {
   Serial.begin(115200);
   SPI.begin();
-  pinMode(CS, OUTPUT);
-  digitalWrite(CS, HIGH);
+  SPI.begin(ADXL345_SCK, ADXL345_MISO, ADXL345_MOSI, ADXL345_CS);
+  pinMode(ADXL345_CS, OUTPUT);
+  digitalWrite(ADXL345_CS, HIGH);
   while (!Serial)
     ;
   Serial.println("Initialized");
@@ -62,31 +69,31 @@ void initialize_ADXL(){
 
 void registerWrite(byte Address, byte data) {
   SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE3));
-  digitalWrite(CS, LOW);
+  digitalWrite(ADXL345_CS, LOW);
   SPI.transfer(Address | WRITEBYTE);
   SPI.transfer(data);
-  digitalWrite(CS, HIGH);
+  digitalWrite(ADXL345_CS, HIGH);
   SPI.endTransaction();
 }
 
 uint8_t registerRead(byte Address) {
   SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE3));
-  digitalWrite(CS, LOW);
+  digitalWrite(ADXL345_CS, LOW);
   SPI.transfer(Address | READBYTE);
   uint8_t data = SPI.transfer(0x00);
-  digitalWrite(CS, HIGH);
+  digitalWrite(ADXL345_CS, HIGH);
   SPI.endTransaction();
   return data;
 }
 
 void multipleRegisterRead(byte Address, int8_t *data, byte size) {
   SPI.beginTransaction(SPISettings(5000000, MSBFIRST, SPI_MODE3));
-  digitalWrite(CS, LOW);
+  digitalWrite(ADXL345_CS, LOW);
   SPI.transfer(Address | READBYTE | MULTIBYTE);
   for(byte i=0; i<size;i++){
     data[i] = SPI.transfer(0);
   }
-  digitalWrite(CS, HIGH);
+  digitalWrite(ADXL345_CS, HIGH);
   SPI.endTransaction();
 }
 
@@ -119,15 +126,15 @@ void IRAM_ATTR ISR_overflow(){
 }
 
 void setup() {
-  pinMode(GPIO_INT1, INPUT);            // Config INT1 PIN as input
-  attachInterrupt(GPIO_INT1,            // Pin for the interruption
-                  ISR_watermark,        // Function for ISR 
-                  RISING);              // Config to rising signal
+  pinMode(GPIO_WATERMARK, INPUT_PULLDOWN);                    // Config INT1 PIN as input
+  attachInterrupt(digitalPinToInterrupt(GPIO_WATERMARK),      // Pin for the interruption
+                  ISR_watermark,                              // Function for ISR 
+                  RISING);                                    // Config to rising signal
 
-  pinMode(GPIO_INT2, INPUT);            // Config INT2 PIN as input
-  attachInterrupt(GPIO_INT2,            // Pin for the interruption
-                  ISR_overflow,         // Function for ISR 
-                  RISING);
+  pinMode(GPIO_OVERRUN, INPUT_PULLDOWN);                      // Config INT2 PIN as input
+  attachInterrupt(digitalPinToInterrupt(GPIO_OVERRUN),        // Pin for the interruption
+                  ISR_overflow,                               // Function for ISR 
+                  RISING);                                    // Config to rising signal
 
   initialize_comm();
   initialize_ADXL();
@@ -136,16 +143,31 @@ void setup() {
 void loop() {
   if (watermark_interrupt){
     uint8_t size = registerRead(FIFO_STATUS);
-    read_fifo(&fifo,0);
-
+    read_fifo(&fifo,WATERMARK_SIZE);
     Serial.print(size);
     Serial.print(" - ");
     Serial.print(fifo.accel_x[0]);
     Serial.print(" - ");
     Serial.print(fifo.accel_y[0]);
     Serial.print(" - ");
-    Serial.println(fifo.accel_z[0]);
+    Serial.print(fifo.accel_z[0]);
+    Serial.print(" - ");
+    Serial.println("watermark");
     watermark_interrupt = false;
+  }
+  if (overflow_interrupt){
+    uint8_t size = registerRead(FIFO_STATUS);
+    read_fifo(&fifo,FIFO_SIZE);
+    Serial.print(size);
+    Serial.print(" - ");
+    Serial.print(fifo.accel_x[0]);
+    Serial.print(" - ");
+    Serial.print(fifo.accel_y[0]);
+    Serial.print(" - ");
+    Serial.print(fifo.accel_z[0]);
+    Serial.print(" - ");
+    Serial.println("overflow");
+    overflow_interrupt = false;
   }
   delay(500);
 }
