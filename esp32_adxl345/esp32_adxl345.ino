@@ -1,8 +1,8 @@
 // RTOS - added 09-07
 #include <freertos/FreeRTOS.h>
 //#include <freertos/queue.h>
+#include <freertos/FreeRTOSConfig.h>
 #include <freertos/task.h>
-
 #include <SPI.h>
 
 #define WRITEBYTE 0x00
@@ -26,7 +26,7 @@
 
 #define WATERMARK_SIZE 16
 #define FIFO_SIZE 32
-#define ACCEL_DB_SIZE 400
+#define ACCEL_DB_SIZE 64
 
 #define SELECT_DB_A 1
 #define SELECT_DB_B 0
@@ -39,8 +39,8 @@
 
 // ********************** Global variables ********************** // 
 
-bool watermark_interrupt = false;
-bool overrun_interrupt = false;
+volatile bool watermark_interrupt = false;
+volatile bool overrun_interrupt = false;
 
 typedef struct accel_data_base{
   int16_t accel_x[ACCEL_DB_SIZE];
@@ -61,12 +61,16 @@ typedef struct accel_fifo{
 db_accel database_a = {{0},{0},{0},{0},0};
 db_accel database_b = {{0},{0},{0},{0},0};
 fifo_accel fifo = {{0},{0},{0},0,0};
-uint8_t database_selection = false;
+uint8_t database_selection = SELECT_DB_A;
 
 // ********************** Prototypes ********************** // 
 
 void vTaskAcquisition(void * pvParams);
 void vTaskCore1Example(void * pvParams);
+
+// ********************** ISR ********************** // 
+void IRAM_ATTR ISR_watermark(){ watermark_interrupt = true; }
+void IRAM_ATTR ISR_overrun(){ overrun_interrupt = true; }
 
 // ********************** ADXL Library ********************** // 
 
@@ -82,6 +86,16 @@ void initialize_comm() {
 }
 
 void initialize_ADXL(){
+  pinMode(GPIO_WATERMARK, INPUT_PULLDOWN);                    // Config INT1 PIN as input
+  attachInterrupt(digitalPinToInterrupt(GPIO_WATERMARK),      // Pin for the interruption
+                  ISR_watermark,                              // Function for ISR 
+                  RISING);                                    // Config to rising signal
+
+  pinMode(GPIO_OVERRUN, INPUT_PULLDOWN);                      // Config INT2 PIN as input
+  attachInterrupt(digitalPinToInterrupt(GPIO_OVERRUN),        // Pin for the interruption
+                  ISR_overrun,                                // Function for ISR 
+                  RISING);                                    // Config to rising signal
+
   registerWrite(POWER_CTL, 0x00);       // Activate standby mode
   registerWrite(DATA_FORMAT, 0x0F);     // Enter 4-wire SPI mode, left justified, full resolution, 16g+- range
   registerWrite(BW_RATE, 0x06);         // Hz:6.25 - Power Mode: Normal
@@ -138,7 +152,6 @@ void read_fifo(accel_fifo *fifo, byte size){
   for(byte i=0; i<size; i++){
     acceleration(&(fifo->accel_x[i]), &(fifo->accel_y[i]), &(fifo->accel_z[i]));
     fifo->count++;
-    //delayMicroseconds(5);               // delay for FIFO register update
   }
 }
 
@@ -150,47 +163,15 @@ void transfer_fifo_to_db(db_accel* db, fifo_accel* fifo){
     db->overrun[db->count] = fifo->overrun;
     db->count++;
   }
-}
-
-
-// ********************** ISR ********************** // 
-void IRAM_ATTR ISR_watermark(){
-  watermark_interrupt = true;
-}
-
-void IRAM_ATTR ISR_overrun(){
-  overrun_interrupt = true;
+  fifo->count = 0;
 }
 
 // ********************** RTOS Tasks ********************** // 
 
 void vTaskAcquisition(void * pvParams)
 {
-  pinMode(GPIO_WATERMARK, INPUT_PULLDOWN);                    // Config INT1 PIN as input
-  attachInterrupt(digitalPinToInterrupt(GPIO_WATERMARK),      // Pin for the interruption
-                  ISR_watermark,                              // Function for ISR 
-                  RISING);                                    // Config to rising signal
-
-  pinMode(GPIO_OVERRUN, INPUT_PULLDOWN);                      // Config INT2 PIN as input
-  attachInterrupt(digitalPinToInterrupt(GPIO_OVERRUN),        // Pin for the interruption
-                  ISR_overrun,                                // Function for ISR 
-                  RISING);                                    // Config to rising signal
-
   initialize_comm();
   initialize_ADXL();
-  Serial.println("Configurations Status");
-  Serial.print("INT_MAP:");
-  Serial.println(registerRead(INT_MAP),BIN);
-  Serial.print("INT_ENABLE:");
-  Serial.println(registerRead(INT_ENABLE),BIN);
-  Serial.print("INT_SOURCE:");
-  Serial.println(registerRead(INT_SOURCE),BIN);
-  Serial.print("POWER_CTL:");
-  Serial.println(registerRead(POWER_CTL),BIN);
-  Serial.print("BW_RATE:");
-  Serial.println(registerRead(BW_RATE),BIN);
-  Serial.print("DATA_FORMAT:");
-  Serial.println(registerRead(DATA_FORMAT),BIN);
 
   // task timing
   TickType_t xLastWakeTime;
@@ -198,15 +179,18 @@ void vTaskAcquisition(void * pvParams)
   // Initialise the xLastWakeTime variable with the current time.
   xLastWakeTime = xTaskGetTickCount();
 
+  byte interruption = 0x00;
+
+  Serial.println("Task Acquisition rodando");
+
   while (1)
   {
-    // Wait for the next cycle.
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );      // Wait for the next cycle.
     // Place your actions below.
 
-    byte interruption = registerRead(INT_SOURCE);
+    interruption = registerRead(INT_SOURCE);
 
-    if (overrun_interrupt ){
+    if (overrun_interrupt | (interruption & 0x01)){
       int16_t size = registerRead(FIFO_STATUS) & 0x3F;
       read_fifo(&fifo,size);
       fifo.overrun = true;
@@ -218,53 +202,41 @@ void vTaskAcquisition(void * pvParams)
       Serial.println(interruption & 0x01);
     }
 
-    if (watermark_interrupt){
+    if (watermark_interrupt | (interruption & 0x02)){
       int16_t size = registerRead(FIFO_STATUS) & 0x3F;
       read_fifo(&fifo,size);
       fifo.overrun = false;
       watermark_interrupt = false;
       overrun_interrupt = false;
-      Serial.println();
       Serial.print("Watermark - ");
       Serial.print(size);
       Serial.print(" - ");
-      Serial.println(interruption & 0x02);
+      Serial.println((interruption & 0x02) >> 1);
     }
-
-    if (fifo.count){
-      fifo.count = 0;
-    }
-
-  /*
-    if (fifo.count){
-    if (database_selection == SELECT_DB_A){
-      if ((ACCEL_DB_SIZE - database_a.count)>=fifo.count){
-        transfer_fifo_to_db(&database_a,&fifo);
-        Serial.println("Loading database a");
-      }
-      else {
-        database_selection = SELECT_DB_B;
-        if((ACCEL_DB_SIZE - database_b.count)>=fifo.count){
-          transfer_fifo_to_db(&database_b,&fifo);
-        }
-        else Serial.println("Both databases full");
-      }
-    }
-    else{
-      if ((ACCEL_DB_SIZE - database_b.count)>=fifo.count){
-        transfer_fifo_to_db(&database_b,&fifo);
-        Serial.println("Loading database b");
-      }
-      else {
-        database_selection = SELECT_DB_A;
-        if((ACCEL_DB_SIZE - database_a.count)>=fifo.count){
+    while (fifo.count){
+      if (database_selection == SELECT_DB_A){
+        if (ACCEL_DB_SIZE - database_a.count >= fifo.count){
           transfer_fifo_to_db(&database_a,&fifo);
+          Serial.println("Loading database a");
         }
-        else Serial.println("Both databases full");
+        else {
+          database_selection = SELECT_DB_B;
+        }
+      }
+      else if (database_selection == SELECT_DB_B){
+        if (ACCEL_DB_SIZE - database_b.count >= fifo.count){
+          transfer_fifo_to_db(&database_b,&fifo);
+          Serial.println("Loading database b");
+        }
+        else {
+          database_selection = SELECT_DB_A;
+        }
+      }
+      if ((ACCEL_DB_SIZE - database_b.count < fifo.count) & (ACCEL_DB_SIZE - database_a.count < fifo.count)){
+        Serial.println("Both databases full");
+        delay(500);
       }
     }
-    }
-    */
   }
 }
 
@@ -273,7 +245,7 @@ void vTaskCore1Example(void * pvParams)
   while(1)
   {
     Serial.println("task core1 rodando");
-    delay(200);
+    delay(4000);
   }
 }
 
