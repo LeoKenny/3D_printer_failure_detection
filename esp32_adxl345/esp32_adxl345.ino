@@ -1,6 +1,6 @@
 // RTOS - added 09-07
 #include <freertos/FreeRTOS.h>
-//#include <freertos/queue.h>
+#include <freertos/queue.h>
 #include <freertos/FreeRTOSConfig.h>
 #include <freertos/task.h>
 #include <SPI.h>
@@ -66,7 +66,8 @@ uint8_t database_selection = SELECT_DB_A;
 // ********************** Prototypes ********************** // 
 
 void vTaskAcquisition(void * pvParams);
-void vTaskCore1Example(void * pvParams);
+void vTaskSerial(void * pvParams);
+QueueHandle_t xQueueSerial;
 
 // ********************** ISR ********************** // 
 void IRAM_ATTR ISR_watermark(){ watermark_interrupt = true; }
@@ -172,14 +173,13 @@ void vTaskAcquisition(void * pvParams)
 {
   initialize_comm();
   initialize_ADXL();
+  byte interruption = 0x00;
 
   // task timing
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = 10/portTICK_PERIOD_MS;
   // Initialise the xLastWakeTime variable with the current time.
   xLastWakeTime = xTaskGetTickCount();
-
-  byte interruption = 0x00;
 
   Serial.println("Task Acquisition rodando");
 
@@ -194,6 +194,7 @@ void vTaskAcquisition(void * pvParams)
       int16_t size = registerRead(FIFO_STATUS) & 0x3F;
       read_fifo(&fifo,size);
       fifo.overrun = true;
+      xQueueSend(xQueueSerial,(void *) &fifo, 40/portTICK_PERIOD_MS);
       overrun_interrupt = false;
       watermark_interrupt = false;
       Serial.print("Overrun - ");
@@ -206,6 +207,7 @@ void vTaskAcquisition(void * pvParams)
       int16_t size = registerRead(FIFO_STATUS) & 0x3F;
       read_fifo(&fifo,size);
       fifo.overrun = false;
+      xQueueSend(xQueueSerial,(void *) &fifo, 40/portTICK_PERIOD_MS);
       watermark_interrupt = false;
       overrun_interrupt = false;
       Serial.print("Watermark - ");
@@ -240,15 +242,36 @@ void vTaskAcquisition(void * pvParams)
   }
 }
 
-void vTaskCore1Example(void * pvParams)
+void vTaskSerial(void * pvParams)
 {
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xFrequency = 15000/portTICK_PERIOD_MS;
+  const TickType_t xFrequency = 10000/portTICK_PERIOD_MS;
+  fifo_accel data;
   vTaskDelayUntil( &xLastWakeTime, xFrequency );
   Serial.println("task core 1 running");
   while(1)
   {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );        // Wait for the next cycle.
+    if (uxQueueMessagesWaiting(xQueueSerial)){
+      Serial.println("Messages from queue.");
+      if(xQueueReceive(xQueueSerial ,&data ,40/portTICK_PERIOD_MS)){
+        for (uint8_t i=0; i < data.count; i++){
+          Serial.print(data.accel_x[i]);
+          Serial.print(",");
+          Serial.print(data.accel_y[i]);
+          Serial.print(",");
+          Serial.print(data.accel_z[i]);
+          Serial.print(",");
+          Serial.print(data.overrun);
+          Serial.print(",");
+          Serial.print(data.count);
+          Serial.print(",");
+          Serial.println(i);
+        }
+      }
+
+      
+    }
     if (ACCEL_DB_SIZE - database_a.count < FIFO_SIZE){
       Serial.println("Printing db a");
       for (uint8_t i=0; i<database_a.count; i++){
@@ -296,13 +319,14 @@ void setup() {
     , 0 );                              /* Afinidade - Core 0*/
 
     xTaskCreatePinnedToCore(
-    vTaskCore1Example                    /* Funcao a qual esta implementado o que a tarefa deve fazer */
+    vTaskSerial                         /* Funcao a qual esta implementado o que a tarefa deve fazer */
     ,  "Acq. task"                      /* Nome (para fins de debug, se necessário) */
     ,  2048                             /* Tamanho da stack (em words) reservada para essa tarefa */
     ,  NULL                             /* Parametros passados (nesse caso, não há) */
     ,  3                                /* Prioridade */
     ,  NULL                             /* Handle da tarefa, opcional (nesse caso, não há) */
     , 1 );                              /* Afinidade - Core 1*/
+    xQueueSerial = xQueueCreate(10, sizeof(fifo_accel));
 }
 
 void loop() {}
