@@ -54,6 +54,7 @@ typedef struct accel_fifo{
   int16_t accel_x[FIFO_SIZE];
   int16_t accel_y[FIFO_SIZE];
   int16_t accel_z[FIFO_SIZE];
+  uint32_t block;
   byte count;
   bool overrun;
 } fifo_accel;
@@ -145,7 +146,7 @@ void acceleration(int16_t* accel_x, int16_t *accel_y, int16_t *accel_z) {
   *accel_z = (data[5] << 5) | (data[4] >> 3);
 }
 
-void read_fifo(accel_fifo *fifo, byte size){
+void read_fifo(fifo_accel *fifo, byte size){
   fifo->count = 0;
   if (size == 0){
     size = WATERMARK_SIZE;
@@ -156,17 +157,6 @@ void read_fifo(accel_fifo *fifo, byte size){
   }
 }
 
-void transfer_fifo_to_db(db_accel* db, fifo_accel* fifo){
-  for(uint8_t i = 0; i<fifo->count; i++){
-    db->accel_x[db->count] = fifo->accel_x[i];
-    db->accel_y[db->count] = fifo->accel_y[i];
-    db->accel_z[db->count] = fifo->accel_z[i];
-    db->overrun[db->count] = fifo->overrun;
-    db->count++;
-  }
-  fifo->count = 0;
-}
-
 // ********************** RTOS Tasks ********************** // 
 
 void vTaskAcquisition(void * pvParams)
@@ -174,12 +164,12 @@ void vTaskAcquisition(void * pvParams)
   initialize_comm();
   initialize_ADXL();
   byte interruption = 0x00;
+  uint32_t block = 0;
 
   // task timing
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = 10/portTICK_PERIOD_MS;
-  // Initialise the xLastWakeTime variable with the current time.
-  xLastWakeTime = xTaskGetTickCount();
+  xLastWakeTime = xTaskGetTickCount();                  // Initialise the xLastWakeTime variable with the current time.
 
   Serial.println("Task Acquisition rodando");
 
@@ -194,9 +184,11 @@ void vTaskAcquisition(void * pvParams)
       int16_t size = registerRead(FIFO_STATUS) & 0x3F;
       read_fifo(&fifo,size);
       fifo.overrun = true;
+      fifo.block = block;
       xQueueSend(xQueueSerial,(void *) &fifo, 40/portTICK_PERIOD_MS);
       overrun_interrupt = false;
       watermark_interrupt = false;
+      block++;
       Serial.print("Overrun - ");
       Serial.print(size);
       Serial.print(" - ");
@@ -206,38 +198,16 @@ void vTaskAcquisition(void * pvParams)
     if (watermark_interrupt | (interruption & 0x02)){
       int16_t size = registerRead(FIFO_STATUS) & 0x3F;
       read_fifo(&fifo,size);
+      fifo.block = block;
       fifo.overrun = false;
       xQueueSend(xQueueSerial,(void *) &fifo, 40/portTICK_PERIOD_MS);
       watermark_interrupt = false;
       overrun_interrupt = false;
+      block++;
       Serial.print("Watermark - ");
       Serial.print(size);
       Serial.print(" - ");
       Serial.println((interruption & 0x02) >> 1);
-    }
-    while (fifo.count){
-      if (database_selection == SELECT_DB_A){
-        if (ACCEL_DB_SIZE - database_a.count >= fifo.count){
-          transfer_fifo_to_db(&database_a,&fifo);
-          Serial.println("Loading database a");
-        }
-        else {
-          database_selection = SELECT_DB_B;
-        }
-      }
-      else if (database_selection == SELECT_DB_B){
-        if (ACCEL_DB_SIZE - database_b.count >= fifo.count){
-          transfer_fifo_to_db(&database_b,&fifo);
-          Serial.println("Loading database b");
-        }
-        else {
-          database_selection = SELECT_DB_A;
-        }
-      }
-      if ((ACCEL_DB_SIZE - database_b.count < fifo.count) & (ACCEL_DB_SIZE - database_a.count < fifo.count)){
-        Serial.println("Both databases full");
-        delay(500);
-      }
     }
   }
 }
@@ -262,6 +232,8 @@ void vTaskSerial(void * pvParams)
           Serial.print(",");
           Serial.print(data.accel_z[i]);
           Serial.print(",");
+          Serial.print(data.block);
+          Serial.print(",");
           Serial.print(data.overrun);
           Serial.print(",");
           Serial.print(data.count);
@@ -269,38 +241,6 @@ void vTaskSerial(void * pvParams)
           Serial.println(i);
         }
       }
-
-      
-    }
-    if (ACCEL_DB_SIZE - database_a.count < FIFO_SIZE){
-      Serial.println("Printing db a");
-      for (uint8_t i=0; i<database_a.count; i++){
-        Serial.print(database_a.accel_x[i]);
-        Serial.print(",");
-        Serial.print(database_a.accel_y[i]);
-        Serial.print(",");
-        Serial.print(database_a.accel_z[i]);
-        Serial.print(",");
-        Serial.print(database_a.overrun[i]);
-        Serial.print(",");
-        Serial.println(i);
-      }
-      database_a.count = 0;
-    }
-    if (ACCEL_DB_SIZE - database_b.count < FIFO_SIZE){
-      Serial.println("Printing db b");
-      for (uint8_t i=0; i<database_b.count; i++){
-        Serial.print(database_b.accel_x[i]);
-        Serial.print(",");
-        Serial.print(database_b.accel_y[i]);
-        Serial.print(",");
-        Serial.print(database_b.accel_z[i]);
-        Serial.print(",");
-        Serial.print(database_b.overrun[i]);
-        Serial.print(",");
-        Serial.println(i);
-      }
-      database_b.count = 0;
     }
   }
 }
