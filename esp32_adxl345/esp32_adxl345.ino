@@ -242,10 +242,43 @@ void vTaskAcquisition(void * pvParams)
 
 void vTaskCore1Example(void * pvParams)
 {
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xFrequency = 15000/portTICK_PERIOD_MS;
+  vTaskDelayUntil( &xLastWakeTime, xFrequency );
+  Serial.println("task core 1 running");
   while(1)
   {
-    Serial.println("task core1 rodando");
-    delay(4000);
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );        // Wait for the next cycle.
+    if (ACCEL_DB_SIZE - database_a.count < FIFO_SIZE){
+      Serial.println("Printing db a");
+      for (uint8_t i=0; i<database_a.count; i++){
+        Serial.print(database_a.accel_x[i]);
+        Serial.print(",");
+        Serial.print(database_a.accel_y[i]);
+        Serial.print(",");
+        Serial.print(database_a.accel_z[i]);
+        Serial.print(",");
+        Serial.print(database_a.overrun[i]);
+        Serial.print(",");
+        Serial.println(i);
+      }
+      database_a.count = 0;
+    }
+    if (ACCEL_DB_SIZE - database_b.count < FIFO_SIZE){
+      Serial.println("Printing db b");
+      for (uint8_t i=0; i<database_b.count; i++){
+        Serial.print(database_b.accel_x[i]);
+        Serial.print(",");
+        Serial.print(database_b.accel_y[i]);
+        Serial.print(",");
+        Serial.print(database_b.accel_z[i]);
+        Serial.print(",");
+        Serial.print(database_b.overrun[i]);
+        Serial.print(",");
+        Serial.println(i);
+      }
+      database_b.count = 0;
+    }
   }
 }
 
@@ -265,7 +298,7 @@ void setup() {
     xTaskCreatePinnedToCore(
     vTaskCore1Example                    /* Funcao a qual esta implementado o que a tarefa deve fazer */
     ,  "Acq. task"                      /* Nome (para fins de debug, se necessário) */
-    ,  1024                             /* Tamanho da stack (em words) reservada para essa tarefa */
+    ,  2048                             /* Tamanho da stack (em words) reservada para essa tarefa */
     ,  NULL                             /* Parametros passados (nesse caso, não há) */
     ,  3                                /* Prioridade */
     ,  NULL                             /* Handle da tarefa, opcional (nesse caso, não há) */
