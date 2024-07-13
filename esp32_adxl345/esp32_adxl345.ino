@@ -42,15 +42,7 @@
 volatile bool watermark_interrupt = false;
 volatile bool overrun_interrupt = false;
 
-typedef struct accel_data_base{
-  int16_t accel_x[ACCEL_DB_SIZE];
-  int16_t accel_y[ACCEL_DB_SIZE];
-  int16_t accel_z[ACCEL_DB_SIZE];
-  bool overrun[ACCEL_DB_SIZE];
-  byte count;
-} db_accel;
-
-typedef struct accel_fifo{
+typedef struct fifo_accel{
   int16_t accel_x[FIFO_SIZE];
   int16_t accel_y[FIFO_SIZE];
   int16_t accel_z[FIFO_SIZE];
@@ -58,11 +50,6 @@ typedef struct accel_fifo{
   byte count;
   bool overrun;
 } fifo_accel;
-
-db_accel database_a = {{0},{0},{0},{0},0};
-db_accel database_b = {{0},{0},{0},{0},0};
-fifo_accel fifo = {{0},{0},{0},0,0};
-uint8_t database_selection = SELECT_DB_A;
 
 // ********************** Prototypes ********************** // 
 
@@ -161,15 +148,13 @@ void read_fifo(fifo_accel *fifo, byte size){
 
 void vTaskAcquisition(void * pvParams)
 {
-  initialize_comm();
-  initialize_ADXL();
-  byte interruption = 0x00;
-  uint32_t block = 0;
-
-  // task timing
+    // task timing
+  fifo_accel fifo;
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = 10/portTICK_PERIOD_MS;
   xLastWakeTime = xTaskGetTickCount();                  // Initialise the xLastWakeTime variable with the current time.
+  byte interruption = 0x00;
+  uint32_t block = 0;
 
   Serial.println("Task Acquisition rodando");
 
@@ -216,14 +201,21 @@ void vTaskSerial(void * pvParams)
 {
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xFrequency = 10000/portTICK_PERIOD_MS;
+  TickType_t xLastWakeTimeQueue = xTaskGetTickCount();
+  const TickType_t xFrequencyQueue = 300/portTICK_PERIOD_MS;
   fifo_accel data;
+  uint8_t messages;
+
   vTaskDelayUntil( &xLastWakeTime, xFrequency );
   Serial.println("task core 1 running");
   while(1)
   {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );        // Wait for the next cycle.
-    if (uxQueueMessagesWaiting(xQueueSerial)){
-      Serial.println("Messages from queue.");
+    messages = uxQueueMessagesWaiting(xQueueSerial);
+    while (messages){
+      Serial.print("Messages from queue - ");
+      Serial.println(messages);
+      vTaskDelayUntil( &xLastWakeTimeQueue, xFrequencyQueue );
       if(xQueueReceive(xQueueSerial ,&data ,40/portTICK_PERIOD_MS)){
         for (uint8_t i=0; i < data.count; i++){
           Serial.print(data.accel_x[i]);
@@ -241,6 +233,7 @@ void vTaskSerial(void * pvParams)
           Serial.println(i);
         }
       }
+      messages = uxQueueMessagesWaiting(xQueueSerial);
     }
   }
 }
@@ -248,7 +241,9 @@ void vTaskSerial(void * pvParams)
 // ********************** Arduino task ********************** // 
 
 void setup() {
-    // RTOS - added 09-07
+    initialize_comm();
+    initialize_ADXL();
+
     xTaskCreatePinnedToCore(
     vTaskAcquisition                    /* Funcao a qual esta implementado o que a tarefa deve fazer */
     ,  "Acq. task"                      /* Nome (para fins de debug, se necessário) */
@@ -260,13 +255,13 @@ void setup() {
 
     xTaskCreatePinnedToCore(
     vTaskSerial                         /* Funcao a qual esta implementado o que a tarefa deve fazer */
-    ,  "Acq. task"                      /* Nome (para fins de debug, se necessário) */
+    ,  "Serial task"                    /* Nome (para fins de debug, se necessário) */
     ,  2048                             /* Tamanho da stack (em words) reservada para essa tarefa */
     ,  NULL                             /* Parametros passados (nesse caso, não há) */
     ,  3                                /* Prioridade */
     ,  NULL                             /* Handle da tarefa, opcional (nesse caso, não há) */
     , 1 );                              /* Afinidade - Core 1*/
-    xQueueSerial = xQueueCreate(10, sizeof(fifo_accel));
+    xQueueSerial = xQueueCreate(20, sizeof(fifo_accel));
 }
 
 void loop() {}
