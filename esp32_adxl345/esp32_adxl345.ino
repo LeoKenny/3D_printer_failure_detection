@@ -1,4 +1,3 @@
-// RTOS - added 09-07
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/FreeRTOSConfig.h>
@@ -26,10 +25,6 @@
 
 #define WATERMARK_SIZE 16
 #define FIFO_SIZE 32
-#define ACCEL_DB_SIZE 64
-
-#define SELECT_DB_A 1
-#define SELECT_DB_B 0
 
 // Initialize SPI pins
 #define ADXL345_CS          5
@@ -148,75 +143,68 @@ void read_fifo(fifo_accel *fifo, byte size){
 
 void vTaskAcquisition(void * pvParams)
 {
-    // task timing
+  // task variables
   fifo_accel fifo;
-  TickType_t xLastWakeTime;
-  const TickType_t xFrequency = 10/portTICK_PERIOD_MS;
-  xLastWakeTime = xTaskGetTickCount();                  // Initialise the xLastWakeTime variable with the current time.
-  byte interruption = 0x00;
   uint32_t block = 0;
+  int16_t size = 0;
+  bool sent = false;
 
-  Serial.println("Task Acquisition rodando");
+  // task timing
+  TickType_t xLastWakeTime;
+  const TickType_t xFrequency = 5/portTICK_PERIOD_MS;
+  xLastWakeTime = xTaskGetTickCount();
 
   while (1)
   {
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );      // Wait for the next cycle.
-    // Place your actions below.
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
-    interruption = registerRead(INT_SOURCE);
-
-    if (overrun_interrupt | (interruption & 0x01)){
-      int16_t size = registerRead(FIFO_STATUS) & 0x3F;
-      read_fifo(&fifo,size);
+    if (overrun_interrupt){
+      read_fifo(&fifo,FIFO_SIZE);
       fifo.overrun = true;
       fifo.block = block;
-      xQueueSend(xQueueSerial,(void *) &fifo, 40/portTICK_PERIOD_MS);
+      sent = xQueueSend(xQueueSerial,(void *) &fifo, xFrequency);
+      if (!sent){
+        Serial.println("Failed send to queue");
+      }
+      Serial.println("Failed send to queue");
       overrun_interrupt = false;
       watermark_interrupt = false;
       block++;
-      Serial.print("Overrun - ");
-      Serial.print(size);
-      Serial.print(" - ");
-      Serial.println(interruption & 0x01);
     }
 
-    if (watermark_interrupt | (interruption & 0x02)){
-      int16_t size = registerRead(FIFO_STATUS) & 0x3F;
+    if (watermark_interrupt){
+      size = registerRead(FIFO_STATUS) & 0x3F;
       read_fifo(&fifo,size);
       fifo.block = block;
       fifo.overrun = false;
-      xQueueSend(xQueueSerial,(void *) &fifo, 40/portTICK_PERIOD_MS);
+      sent = xQueueSend(xQueueSerial,(void *) &fifo, xFrequency);
+      if (!sent){
+        Serial.println("Failed send to queue");
+      }
       watermark_interrupt = false;
       overrun_interrupt = false;
       block++;
-      Serial.print("Watermark - ");
-      Serial.print(size);
-      Serial.print(" - ");
-      Serial.println((interruption & 0x02) >> 1);
     }
   }
 }
 
 void vTaskSerial(void * pvParams)
 {
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xFrequency = 10000/portTICK_PERIOD_MS;
-  TickType_t xLastWakeTimeQueue = xTaskGetTickCount();
-  const TickType_t xFrequencyQueue = 300/portTICK_PERIOD_MS;
+  // task variables
   fifo_accel data;
   uint8_t messages;
 
-  vTaskDelayUntil( &xLastWakeTime, xFrequency );
-  Serial.println("task core 1 running");
+  // task timing
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
+  const TickType_t xFrequencySerial = 5/portTICK_PERIOD_MS;
+
   while(1)
   {
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );        // Wait for the next cycle.
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
     messages = uxQueueMessagesWaiting(xQueueSerial);
     while (messages){
-      Serial.print("Messages from queue - ");
-      Serial.println(messages);
-      vTaskDelayUntil( &xLastWakeTimeQueue, xFrequencyQueue );
-      if(xQueueReceive(xQueueSerial ,&data ,40/portTICK_PERIOD_MS)){
+      if(xQueueReceive(xQueueSerial ,&data ,xFrequencySerial)){
         for (uint8_t i=0; i < data.count; i++){
           Serial.print(data.accel_x[i]);
           Serial.print(",");
@@ -244,24 +232,27 @@ void setup() {
     initialize_comm();
     initialize_ADXL();
 
-    xTaskCreatePinnedToCore(
-    vTaskAcquisition                    /* Funcao a qual esta implementado o que a tarefa deve fazer */
-    ,  "Acq. task"                      /* Nome (para fins de debug, se necessário) */
-    ,  1024                             /* Tamanho da stack (em words) reservada para essa tarefa */
-    ,  NULL                             /* Parametros passados (nesse caso, não há) */
-    ,  3                                /* Prioridade */
-    ,  NULL                             /* Handle da tarefa, opcional (nesse caso, não há) */
-    , 0 );                              /* Afinidade - Core 0*/
+    xQueueSerial = xQueueCreate(        // Creating queue to send data from fifo to serial
+    50,                                 // Number of simultaneous items that the fifo can allocate
+    sizeof(fifo_accel));                // Size of the items that the fifo will allocate
 
     xTaskCreatePinnedToCore(
-    vTaskSerial                         /* Funcao a qual esta implementado o que a tarefa deve fazer */
-    ,  "Serial task"                    /* Nome (para fins de debug, se necessário) */
-    ,  2048                             /* Tamanho da stack (em words) reservada para essa tarefa */
-    ,  NULL                             /* Parametros passados (nesse caso, não há) */
-    ,  3                                /* Prioridade */
-    ,  NULL                             /* Handle da tarefa, opcional (nesse caso, não há) */
-    , 1 );                              /* Afinidade - Core 1*/
-    xQueueSerial = xQueueCreate(20, sizeof(fifo_accel));
+    vTaskAcquisition                    // Task run the acquisition function
+    ,  "Acq. task"                      // Name of the task
+    ,  1024                             // Size of the stack to be used in the function
+    ,  NULL                             // No parameters passed to the task
+    ,  3                                // High Priority task
+    ,  NULL                             // Task handle, not used
+    , 0 );                              // Affinity with core 0
+
+    xTaskCreatePinnedToCore(
+    vTaskSerial                         // Task run the serial communication function
+    ,  "Serial task"                    // Name of the task
+    ,  2048                             // Size of the stack to be used in the function
+    ,  NULL                             // No parameters passed to the task
+    ,  3                                // Low Priority task
+    ,  NULL                             // Task handle, not used
+    , 1 );                              // Affinity with core 1
 }
 
 void loop() {}
