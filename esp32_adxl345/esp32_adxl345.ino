@@ -25,6 +25,8 @@
 
 #define WATERMARK_SIZE 16
 #define FIFO_SIZE 32
+#define ACQUISITION_STACK_SIZE 4096
+#define SERIAL_STACK_SIZE 4096
 
 // Initialize SPI pins
 #define ADXL345_CS          5
@@ -44,6 +46,7 @@ typedef struct fifo_accel{
   uint32_t block;
   byte count;
   bool overrun;
+  uint16_t queue_state;
 } fifo_accel;
 
 // ********************** Prototypes ********************** // 
@@ -82,7 +85,7 @@ void initialize_ADXL(){
 
   registerWrite(POWER_CTL, 0x00);       // Activate standby mode
   registerWrite(DATA_FORMAT, 0x0F);     // Enter 4-wire SPI mode, left justified, full resolution, 16g+- range
-  registerWrite(BW_RATE, 0x06);         // Hz:6.25 - Power Mode: Normal
+  registerWrite(BW_RATE, 0x0C);         // Hz:6.25 - Power Mode: Normal
   registerWrite(INT_MAP, 0x01);         // Watermark in INT1 and Overrun in INT2
   registerWrite(FIFO_CTL, 0x50);        // FIFO mode, 16 samples
   registerWrite(POWER_CTL, 0x08);       // Exit standby mode
@@ -145,6 +148,7 @@ void vTaskAcquisition(void * pvParams)
 {
   // task variables
   fifo_accel fifo;
+  fifo.queue_state = 0;
   uint32_t block = 0;
   int16_t size = 0;
   bool sent = false;
@@ -162,11 +166,9 @@ void vTaskAcquisition(void * pvParams)
       read_fifo(&fifo,FIFO_SIZE);
       fifo.overrun = true;
       fifo.block = block;
-      sent = xQueueSend(xQueueSerial,(void *) &fifo, xFrequency);
-      if (!sent){
-        Serial.println("Failed send to queue");
-      }
-      Serial.println("Failed send to queue");
+      fifo.queue_state = uxQueueMessagesWaiting(xQueueSerial);
+      while (!xQueueSend(xQueueSerial,(void *) &fifo, xFrequency))
+        ;
       overrun_interrupt = false;
       watermark_interrupt = false;
       block++;
@@ -177,10 +179,9 @@ void vTaskAcquisition(void * pvParams)
       read_fifo(&fifo,size);
       fifo.block = block;
       fifo.overrun = false;
-      sent = xQueueSend(xQueueSerial,(void *) &fifo, xFrequency);
-      if (!sent){
-        Serial.println("Failed send to queue");
-      }
+      fifo.queue_state = uxQueueMessagesWaiting(xQueueSerial);
+      while (!xQueueSend(xQueueSerial,(void *) &fifo, xFrequency))
+        ;
       watermark_interrupt = false;
       overrun_interrupt = false;
       block++;
@@ -206,19 +207,23 @@ void vTaskSerial(void * pvParams)
     while (messages){
       if(xQueueReceive(xQueueSerial ,&data ,xFrequencySerial)){
         for (uint8_t i=0; i < data.count; i++){
-          Serial.print(data.accel_x[i]);
-          Serial.print(",");
-          Serial.print(data.accel_y[i]);
-          Serial.print(",");
-          Serial.print(data.accel_z[i]);
-          Serial.print(",");
-          Serial.print(data.block);
-          Serial.print(",");
-          Serial.print(data.overrun);
-          Serial.print(",");
-          Serial.print(data.count);
-          Serial.print(",");
-          Serial.println(i);
+          Serial.println(
+            String(data.accel_x[i]) +
+            "," +
+            String(data.accel_y[i]) +
+            "," +
+            String(data.accel_z[i]) +
+            "," +
+            String(data.block) +
+            "," +
+            String(data.overrun) +
+            "," +
+            String(data.count) +
+            "," +
+            String(data.queue_state) +
+            "," +
+            String(i)
+          );
         }
       }
       messages = uxQueueMessagesWaiting(xQueueSerial);
@@ -233,13 +238,13 @@ void setup() {
     initialize_ADXL();
 
     xQueueSerial = xQueueCreate(        // Creating queue to send data from fifo to serial
-    50,                                 // Number of simultaneous items that the fifo can allocate
+    400,                                // Number of simultaneous items that the fifo can allocate
     sizeof(fifo_accel));                // Size of the items that the fifo will allocate
 
     xTaskCreatePinnedToCore(
     vTaskAcquisition                    // Task run the acquisition function
     ,  "Acq. task"                      // Name of the task
-    ,  1024                             // Size of the stack to be used in the function
+    ,  ACQUISITION_STACK_SIZE           // Size of the stack to be used in the function
     ,  NULL                             // No parameters passed to the task
     ,  3                                // High Priority task
     ,  NULL                             // Task handle, not used
@@ -248,7 +253,7 @@ void setup() {
     xTaskCreatePinnedToCore(
     vTaskSerial                         // Task run the serial communication function
     ,  "Serial task"                    // Name of the task
-    ,  2048                             // Size of the stack to be used in the function
+    ,  SERIAL_STACK_SIZE                // Size of the stack to be used in the function
     ,  NULL                             // No parameters passed to the task
     ,  3                                // Low Priority task
     ,  NULL                             // Task handle, not used
