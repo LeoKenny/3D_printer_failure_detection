@@ -109,19 +109,24 @@ int main(int argc, char *argv[]){
     }
 
     // Starting SPI
-    spi_handle = spiOpen(spi_channel, spi_speed, 0);
+    spi_handle = spiOpen(spi_channel,spi_speed,0);
     if(verify_spi(spi_handle) < 0){ return 1; }
     
     delay_ms(2*MS_PER_SECOND);
-
     spi_write_and_read(spi_handle,buffer,input,8);
-
-    delay_ms(2*MS_PER_SECOND);
-
     for (int i=0; i<8; i++){
         printf("%d ", input[i]);
     }
     printf("\n");
+
+    delay_ms(2*MS_PER_SECOND);
+    spi_read(spi_handle,input,8);
+    for (int i=0; i<8; i++){
+        printf("%d ", input[i]);
+    }
+    printf("\n");
+
+    delay_ms(2*MS_PER_SECOND);
 
     spiClose(spi_handle);
     return 0;
