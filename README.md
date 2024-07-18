@@ -2,9 +2,15 @@
 
 Failure detection acquisition, analysis and training
 
-## Transfer Serial (Arduino-PC)
+## Transfer SPI (Arduino[Slave]-Raspberry[Master])
 
-(Python Github)[https://github.com/PowerBroker2/pySerialTransfer]
-(Arduino Github)[https://github.com/PowerBroker2/SerialTransfer]
+[Esp32 Library](https://github.com/hideakitai/ESP32SPISlave/tree/main)
 
-Examples working are test_esp32_serialtransfer.ino -> test_pyserialtransfer.py.
+[Raspberry pi Library](https://abyz.me.uk/rpi/pigpio/cif.html)
+
+Installing pigpio
+
+```bash
+sudo apt-get update
+sudo apt-get install pigpio python-pigpio python3-pigpio
+```
