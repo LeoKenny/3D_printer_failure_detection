@@ -48,8 +48,12 @@ void delay_ms(double ms){
     nanosleep(&delay,NULL);
 }
 
-int spi_read(int spi_handle, char *command, char *buffer, int count){
+int spi_write_and_read(int spi_handle, char *command, char *buffer, int count){
     return spiXfer(spi_handle, command, buffer, count);
+}
+
+int spi_read(int spi_handle, char *buffer, int count){
+    return spiRead(spi_handle,buffer,count);
 }
 
 int spi_write(int spi_handle, char *buffer, int count){
@@ -96,6 +100,7 @@ void save_data(char *output_name, int samples_counter, int *overrun_data,
 
 int main(int argc, char *argv[]){
     char buffer[8] = {1,2,3,4,5,6,7,8};
+    char input[8];
     int spi_handle;
     // Starting GPIO
     if (gpioInitialise() == PI_INIT_FAILED){      // pigpio initialisation failed.
@@ -109,9 +114,15 @@ int main(int argc, char *argv[]){
     
     delay_ms(2*MS_PER_SECOND);
 
-    spi_write(spi_handle,buffer,8);
+    spi_write_and_read(spi_handle,buffer,input,8);
 
     delay_ms(2*MS_PER_SECOND);
+
+    for (int i=0; i<8; i++){
+        printf("%d ", input[i]);
+    }
+    printf("\n");
+
     spiClose(spi_handle);
     return 0;
 }
