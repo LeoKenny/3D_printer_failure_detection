@@ -9,7 +9,7 @@
 ESP32SPISlave slave;
 static constexpr size_t BUFFER_SIZE = 8;
 static constexpr size_t QUEUE_SIZE = 1;
-uint8_t tx_buf[BUFFER_SIZE] {1, 2, 3, 4, 5, 6, 7, 8};
+uint8_t tx_buf[BUFFER_SIZE] {3, 4, 5, 6, 7, 8, 9, 10};
 uint8_t rx_buf[BUFFER_SIZE] {0, 0, 0, 0, 0, 0, 0, 0};
 size_t offset = 0;
 
@@ -47,4 +47,18 @@ void loop()
       Serial.print(tx_buf[i]);
     }
     Serial.println();
+    delay(2000);
+  
+    slave.transfer(tx_buf, rx_buf, BUFFER_SIZE);
+    Serial.print("tx_buff: ");
+    for(int i=0; i<BUFFER_SIZE;i++){
+      Serial.print(tx_buf[i]);
+    }
+    Serial.println();
+    Serial.print("rx_buff: ");
+    for(int i=0; i<BUFFER_SIZE;i++){
+      Serial.print(rx_buf[i]);
+    }
+    Serial.println();
+
 }
