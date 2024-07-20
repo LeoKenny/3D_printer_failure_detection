@@ -6,6 +6,8 @@
 
 #include <pigpio.h>
 #define BUFFER_SIZE 8
+#define FIFO_SIZE 1
+#define HEADER_SIZE 8
 
 const double conversion_const = (2.0*16.0)/8192;       // +-16g for 13 bits, pg 27
 
@@ -20,10 +22,33 @@ enum { NS_PER_SECOND = 1000000000,
        MS_PER_SECOND = 1000
 };
 
-typedef struct test_data{
-    int16_t value1;
-    int32_t value2;
-} test_data;
+typedef struct fifo_accel{
+  int16_t accel_x[FIFO_SIZE];
+  int16_t accel_y[FIFO_SIZE];
+  int16_t accel_z[FIFO_SIZE];
+  uint8_t count;
+  uint32_t block;
+  uint8_t overrun;
+  uint16_t queue_state;
+} fifo_accel;
+
+void convert_to_header(uint8_t* tx_header, fifo_accel tx_data){
+    memset(tx_header, 0, HEADER_SIZE);
+    memcpy((void*)tx_header,(void*)&(tx_data.count), sizeof(tx_data.count));
+    memcpy((void*)&(tx_header[1]),(void*)&(tx_data.block), sizeof(tx_data.block));
+    memcpy((void*)&(tx_header[5]),(void*)&(tx_data.overrun), sizeof(tx_data.overrun));
+    memcpy((void*)&(tx_header[6]),(void*)&(tx_data.queue_state), sizeof(tx_data.queue_state));
+}
+
+void convert_to_data(uint8_t* rx_header, fifo_accel* rx_data){
+  rx_data->accel_x[0] = 0;
+  rx_data->accel_y[0] = 0;
+  rx_data->accel_z[0] = 0;
+  memcpy((void*)&(rx_data->count), (void*)rx_header, sizeof(rx_data->count));
+  memcpy((void*)&(rx_data->block), (void*)&(rx_header[1]), sizeof(rx_data->block));
+  memcpy((void*)&(rx_data->overrun), (void*)&(rx_header[5]), sizeof(rx_data->overrun));
+  memcpy((void*)&(rx_data->queue_state), (void*)&(rx_header[6]), sizeof(rx_data->queue_state));
+}
 
 void delay_ms(double ms){
     struct timespec delay;
@@ -67,25 +92,29 @@ int verify_spi(int spi_handle){
     return spi_handle;
 }
 
-void convert_to_buffer(uint8_t* tx_buf, test_data data_tx){
-    memcpy((void*)tx_buf, (void*)&data_tx.value1, sizeof(data_tx.value1));
-    memcpy((void*)&tx_buf[2], (void*)&data_tx.value2, sizeof(data_tx.value2));
-}
-
-void convert_to_data(uint8_t* rx_buf, test_data *data_rx){
-    memcpy((void*)&(data_rx->value1), (void*)rx_buf, sizeof(data_rx->value1));
-    memcpy((void*)&(data_rx->value2), (void*)&rx_buf[2], sizeof(data_rx->value2));
-}
-
 int main(int argc, char *argv[]){
-    uint8_t rx_buf[BUFFER_SIZE] = {0};
-    uint8_t tx_buf[BUFFER_SIZE] = {0};
+    uint8_t rx_buf[HEADER_SIZE] = {0};
+    uint8_t tx_buf[HEADER_SIZE] = {0};
     int spi_handle;
-    test_data data_tx;
-    test_data data_rx;
+    fifo_accel data_tx;
+    fifo_accel data_rx;
 
-    data_tx.value1 = -1;
-    data_tx.value2 = 70000;
+    data_tx.accel_x[0] = 6;
+    data_tx.accel_y[0] = 5;
+    data_tx.accel_z[0] = 4;
+    data_tx.count = 6;
+    data_tx.block = 7;
+    data_tx.overrun = 1;
+    data_tx.queue_state = 8;
+
+
+    data_rx.accel_x[0] = 0;
+    data_rx.accel_y[0] = 1;
+    data_rx.accel_z[0] = 2;
+    data_rx.count = 2;
+    data_rx.block = 3;
+    data_rx.overrun = 1;
+    data_rx.queue_state = 5;
 
    // Starting GPIO
     if (gpioInitialise() == PI_INIT_FAILED){      // pigpio initialisation failed.
@@ -97,21 +126,37 @@ int main(int argc, char *argv[]){
     spi_handle = spiOpen(spi_channel,spi_speed,0);
     if(verify_spi(spi_handle) < 0){ return 1; }
 
-    convert_to_buffer(tx_buf, data_tx);
+    convert_to_header(tx_buf, data_tx);
     delay_ms(2*MS_PER_SECOND);
-    spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
-    convert_to_data(rx_buf, &data_rx);
+    spi_write_and_read(spi_handle,tx_buf,rx_buf,HEADER_SIZE);
     convert_to_data(tx_buf, &data_tx);
 
-    printf("TX: \tvalue 1: %d - value 2: %d\n", data_tx.value1,data_tx.value2);
-    for (int i=0; i<BUFFER_SIZE; i++){
-        printf("%d ", tx_buf[i]);
+    printf("tx_header: \tcount: ");
+    printf("%d",data_tx.count);
+    printf(" - block: ");
+    printf("%d",data_tx.block);
+    printf(" - overrun: ");
+    printf("%d",data_tx.overrun);
+    printf(" - queue_state: ");
+    printf("%d",data_tx.queue_state);
+    printf("\n");
+    for(int i=0; i<HEADER_SIZE;i++){
+      printf("%d ",tx_buf[i]);
     }
     printf("\n");
 
-    printf("RX: \tvalue 1: %d - value 2: %d\n", data_rx.value1,data_rx.value2);
-    for (int i=0; i<BUFFER_SIZE; i++){
-        printf("%d ", rx_buf[i]);
+    convert_to_data(rx_buf, &data_rx);
+    printf("rx_header: \tcount: ");
+    printf("%d",data_rx.count);
+    printf(" - block: ");
+    printf("%d",data_rx.block);
+    printf(" - overrun: ");
+    printf("%d",data_rx.overrun);
+    printf(" - queue_state: ");
+    printf("%d",data_rx.queue_state);
+    printf("\n");
+    for(int i=0; i<HEADER_SIZE;i++){
+      printf("%d ",rx_buf[i]);
     }
     printf("\n");
 
