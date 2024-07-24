@@ -163,8 +163,8 @@ int main(int argc, char *argv[]){
     reset_fifo_accel(&data_rx);
     reset_fifo_accel(&data_tx);
 
-    t = localtime(&now);
     time(&now);
+    t = localtime(&now);
     strftime(filename, sizeof(filename), "%H_%M_%S_%d_%m.txt", t);
     file = fopen(filename,"a");
     fprintf(file, "count,block,overrun,queue_size,accel_x,accel_y,accel_z\n");
@@ -181,21 +181,18 @@ int main(int argc, char *argv[]){
         return 1;
     }
 
-    //while(1){
-        // Delay between readings
-        delay_ms(40/MS_PER_SECOND);
-
+    while(1){
 
         // Starting SPI
         spi_handle = spiOpen(spi_channel,spi_speed,0);
         if(verify_spi(spi_handle) < 0){ return 1; }
 
+        delay_ms(1); // Delay needed for between readings
         convert_to_header(tx_header, data_tx);
         message_handle = spi_write_and_read(spi_handle,tx_header,rx_header,HEADER_SIZE);
         convert_to_info(rx_header, &data_rx);
 
-        delay_ms(MS_PER_SECOND*0.001); // Delay needed for between readings
-
+        delay_ms(1); // Delay needed for between readings
         convert_to_buffer(tx_buf,data_tx);
         message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
         spiClose(spi_handle);
@@ -215,7 +212,7 @@ int main(int argc, char *argv[]){
                     );
         }
         fclose(file);
-    //}
+    }
 
     return 0;
 }
