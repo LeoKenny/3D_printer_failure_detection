@@ -1,5 +1,4 @@
 #include <ESP32DMASPISlave.h>
-#include "helper.h"
 
 ESP32DMASPI::Slave slave;
 

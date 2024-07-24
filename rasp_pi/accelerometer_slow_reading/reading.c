@@ -204,7 +204,7 @@ int main(int argc, char *argv[]){
     printf("\n");
 
     convert_to_buffer(tx_buf,data_tx);
-    delay_ms(MS_PER_SECOND);
+    delay_ms(MS_PER_SECOND*0.001);
     message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
     printf("Message Handle buffer: %d\n", message_handle);
 

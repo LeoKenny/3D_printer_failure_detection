@@ -3,16 +3,16 @@ CFLAGS = -Wall -pthread
 LIBS = -L /usr/local/include -lpigpio -lrt
 INSTALL = `which install`
 
-all: packages test_spi
+all: packages reading
 
-install: test_spi
-	$(INSTALL) ./test_spi /usr/local/bin/test_spi
+install: reading
+	$(INSTALL) ./reading /usr/local/bin/reading
 
 clean:
-	rm -f test_spi
+	rm -f reading
 
 packages:
 	if ! dpkg-query -W -f='$${Status}' pigpio | grep "ok installed"; then apt-get -y install pigpio; fi
 
-test_spi: test_spi.c
-	$(CC) $(CFLAGS) test_spi.c $(LIBS) -o test_spi
+reading: reading.c
+	$(CC) $(CFLAGS) reading.c $(LIBS) -o reading
