@@ -7,8 +7,8 @@
 #include <pigpio.h>
 
 #define FIFO_SIZE 32
-#define BUFFER_SIZE (FIFO_SIZE*2*3)
 #define HEADER_SIZE 8
+#define BUFFER_SIZE (FIFO_SIZE*2*3)+HEADER_SIZE
 
 const double conversion_const = (2.0*16.0)/8192;       // +-16g for 13 bits, pg 27
 
@@ -33,42 +33,39 @@ typedef struct fifo_accel{
   uint16_t queue_state;
 } fifo_accel;
 
-void convert_to_header(uint8_t* tx_header, fifo_accel tx_data){
-    memset(tx_header, 0, HEADER_SIZE);
-    uint8_t size_count = sizeof(tx_data.count);
-    uint8_t size_block = sizeof(tx_data.block);
-    uint8_t size_overrun = sizeof(tx_data.overrun);
-    uint8_t size_queue_state = sizeof(tx_data.queue_state);
-    memcpy((void*)tx_header,(void*)&(tx_data.count), size_count);
-    memcpy((void*)(tx_header+size_count),(void*)&(tx_data.block), size_block);
-    memcpy((void*)(tx_header+size_count+size_block),(void*)&(tx_data.overrun), size_overrun);
-    memcpy((void*)(tx_header+size_count+size_block+size_overrun),(void*)&(tx_data.queue_state), size_queue_state);
-}
-
-void convert_to_info(uint8_t* rx_header, fifo_accel* rx_data){
-    uint8_t size_count = sizeof(rx_data->count);
-    uint8_t size_block = sizeof(rx_data->block);
-    uint8_t size_overrun = sizeof(rx_data->overrun);
-    uint8_t size_queue_state = sizeof(rx_data->queue_state);
-    memcpy((void*)&(rx_data->count), (void*)rx_header, size_count);
-    memcpy((void*)&(rx_data->block), (void*)(rx_header+size_count), size_block);
-    memcpy((void*)&(rx_data->overrun), (void*)(rx_header+size_count+size_block), size_overrun);
-    memcpy((void*)&(rx_data->queue_state), (void*)(rx_header+size_count+size_block+size_overrun), size_queue_state);
-}
-
 void convert_to_buffer(uint8_t* tx_buf, fifo_accel tx_data){
   memset(tx_buf, 0, BUFFER_SIZE);
+  uint8_t size_count = sizeof(tx_data.count);
+  uint8_t size_block = sizeof(tx_data.block);
+  uint8_t size_overrun = sizeof(tx_data.overrun);
+  uint8_t size_queue_state = sizeof(tx_data.queue_state);
+  uint8_t size_header = size_count+size_block+size_overrun+size_queue_state;
   uint8_t size = sizeof(tx_data.accel_x);
-  memcpy((void*)tx_buf,(void*)tx_data.accel_x, size);
-  memcpy((void*)tx_buf + size,(void*)tx_data.accel_y, size);
-  memcpy((void*)tx_buf + 2*size,(void*)tx_data.accel_z, size);
+  // count, block, overrun, queue_state, accel_x, accel_y, accel_z
+  memcpy((void*)tx_buf,(void*)&(tx_data.count), size_count);
+  memcpy((void*)(tx_buf+size_count),(void*)&(tx_data.block), size_block);
+  memcpy((void*)(tx_buf+size_count+size_block),(void*)&(tx_data.overrun), size_overrun);
+  memcpy((void*)(tx_buf+size_count+size_block+size_overrun),(void*)&(tx_data.queue_state), size_queue_state);
+  memcpy((void*)(tx_buf+size_header),(void*)tx_data.accel_x, size);
+  memcpy((void*)(tx_buf+size_header+size),(void*)tx_data.accel_y, size);
+  memcpy((void*)(tx_buf+size_header+(2*size)),(void*)tx_data.accel_z, size);
 }
 
 void convert_to_data(uint8_t* rx_buf, fifo_accel* rx_data){
+  uint8_t size_count = sizeof(rx_data->count);
+  uint8_t size_block = sizeof(rx_data->block);
+  uint8_t size_overrun = sizeof(rx_data->overrun);
+  uint8_t size_queue_state = sizeof(rx_data->queue_state);
+  uint8_t size_header = size_count+size_block+size_overrun+size_queue_state;
   uint8_t size = sizeof(rx_data->accel_x);
-  memcpy((void*)(rx_data->accel_x), (void*)rx_buf, size);
-  memcpy((void*)(rx_data->accel_y), (void*)rx_buf + size, size);
-  memcpy((void*)(rx_data->accel_z), (void*)rx_buf + 2*size, size);
+  // count, block, overrun, queue_state, accel_x, accel_y, accel_z
+  memcpy((void*)&(rx_data->count), (void*)rx_buf, size_count);
+  memcpy((void*)&(rx_data->block), (void*)(rx_buf+size_count), size_block);
+  memcpy((void*)&(rx_data->overrun), (void*)(rx_buf+size_count+size_block), size_overrun);
+  memcpy((void*)&(rx_data->queue_state), (void*)(rx_buf+size_count+size_block+size_overrun), size_queue_state);
+  memcpy((void*)(rx_data->accel_x), (void*)(rx_buf+size_header), size);
+  memcpy((void*)(rx_data->accel_y), (void*)(rx_buf+size_header+size), size);
+  memcpy((void*)(rx_data->accel_z), (void*)(rx_buf+size_header+(2*size)), size);
 }
 
 void delay_ms(double ms){
@@ -132,25 +129,12 @@ int verify_message(int message_status){
 }
 
 int main(int argc, char *argv[]){
-    uint8_t rx_header[HEADER_SIZE] = {0};
-    uint8_t tx_header[HEADER_SIZE] = {0};
     uint8_t rx_buf[BUFFER_SIZE] = {0};
     uint8_t tx_buf[BUFFER_SIZE] = {0};
     int spi_handle;
     int message_handle;
-    fifo_accel data_tx;
     fifo_accel data_rx;
     FILE* file_ptr;
-
-    for (uint8_t i=0; i<FIFO_SIZE; i++){
-        data_tx.accel_x[i] = 9 - (i%10);
-        data_tx.accel_y[i] = 9 - (i%10);
-        data_tx.accel_z[i] = 9 - (i%10);
-    }
-    data_tx.count = 16;
-    data_tx.block = 0;
-    data_tx.overrun = 0;
-    data_tx.queue_state = 10;
     
     memset(data_rx.accel_x, 0, FIFO_SIZE*2);
     memset(data_rx.accel_y, 0, FIFO_SIZE*2);
@@ -174,18 +158,13 @@ int main(int argc, char *argv[]){
         spi_handle = spiOpen(spi_channel,spi_speed,0);
         if(verify_spi(spi_handle) < 0){ return 1; }
 
-        convert_to_header(tx_header, data_tx);
-        message_handle = spi_write_and_read(spi_handle,tx_header,rx_header,HEADER_SIZE);
-
         delay_ms(MS_PER_SECOND*0.001);
         message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
-
         convert_to_data(rx_buf, &data_rx);
-        convert_to_info(rx_header, &data_rx);
 
         for(int i=0; i<FIFO_SIZE;i++){
           fprintf(file_ptr, "%d,%d,%d,%d,%d,%d,%d\n",
-                  data_rx.count,data_rx.block,
+                  data_rx.block,data_rx.count,
                   data_rx.overrun,data_rx.queue_state,
                   data_rx.accel_x[i],data_rx.accel_y[i],data_rx.accel_z[i]
                   );
