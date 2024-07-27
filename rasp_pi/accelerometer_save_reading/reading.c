@@ -151,28 +151,34 @@ int main(int argc, char *argv[]){
     }
     uint8_t queue_size = 1;
     file_ptr = fopen("Test_acquisition.csv", "w+");
-    fprintf(file_ptr, "count,block,overrun,queue_state,accel_x,accel_y,accel_z\n");
+    fprintf(file_ptr, "block,count,overrun,queue_state,accel_x,accel_y,accel_z\n");
 
-    while(queue_size > 0){
-        // Starting SPI
-        spi_handle = spiOpen(spi_channel,spi_speed,0);
-        if(verify_spi(spi_handle) < 0){ return 1; }
+    int repeat = 2;
+    while(repeat > 0){
+        while(queue_size > 0){
+            // Starting SPI
+            spi_handle = spiOpen(spi_channel,spi_speed,0);
+            if(verify_spi(spi_handle) < 0){ return 1; }
 
-        delay_ms(MS_PER_SECOND*0.001);
-        message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
-        convert_to_data(rx_buf, &data_rx);
+            delay_ms(MS_PER_SECOND*0.001);
+            message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
+            convert_to_data(rx_buf, &data_rx);
 
-        for(int i=0; i<FIFO_SIZE;i++){
-          fprintf(file_ptr, "%d,%d,%d,%d,%d,%d,%d\n",
-                  data_rx.block,data_rx.count,
-                  data_rx.overrun,data_rx.queue_state,
-                  data_rx.accel_x[i],data_rx.accel_y[i],data_rx.accel_z[i]
-                  );
+            for(int i=0; i<FIFO_SIZE;i++){
+              fprintf(file_ptr, "%d,%d,%d,%d,%d,%d,%d\n",
+                      data_rx.block,data_rx.count,
+                      data_rx.overrun,data_rx.queue_state,
+                      data_rx.accel_x[i],data_rx.accel_y[i],data_rx.accel_z[i]
+                      );
+            }
+
+            spiClose(spi_handle);
+            queue_size = data_rx.queue_state;
+            delay_ms(MS_PER_SECOND*0.01);
         }
-
-        spiClose(spi_handle);
-        queue_size = data_rx.queue_state;
         delay_ms(MS_PER_SECOND*0.1);
+        repeat--;
+        queue_size = 1;
     }
     fclose(file_ptr);
     return 0;

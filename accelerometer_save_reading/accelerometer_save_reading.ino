@@ -26,6 +26,7 @@ uint8_t *tx_header;
 uint8_t *rx_header;
 uint8_t *tx_buf;
 uint8_t *rx_buf;
+int repeat;
 
 fifo_accel fifo_data;
 fifo_accel fifo_data_rx;
@@ -83,13 +84,14 @@ void setup()
     fifo_data.accel_x[i] = i%10;
     fifo_data.accel_y[i] = i%10;
     fifo_data.accel_z[i] = i%10;
-    fifo_data.count = FIFO_SIZE;
   }
+  fifo_data.count = FIFO_SIZE;
   fifo_data.block = 0;
   fifo_data.overrun = 0;
   fifo_data.queue_state = 10;
 
   Serial.println("start spi slave");
+  repeat = 1;
 }
 
 void loop()
@@ -99,8 +101,13 @@ void loop()
   convert_to_buffer(tx_buf, fifo_data);
   received_bytes = slave.transfer(tx_buf, rx_buf, BUFFER_SIZE);
   convert_to_data(tx_buf, &fifo_data_rx);
-  Serial.println(fifo_data_rx.count);
 
+  if((fifo_data.queue_state == 0)&(repeat>0)){
+    repeat--;
+    fifo_data.queue_state = 11;
+    Serial.print("Repeat: ");
+    Serial.println(repeat);
+  }
   if(fifo_data.queue_state == 0){
     Serial.println(fifo_data.queue_state);
     Serial.println("End of queue");
