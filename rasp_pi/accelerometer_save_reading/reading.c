@@ -153,9 +153,8 @@ int main(int argc, char *argv[]){
     file_ptr = fopen("Test_acquisition.csv", "w+");
     fprintf(file_ptr, "block,count,overrun,queue_state,accel_x,accel_y,accel_z\n");
 
-    int repeat = 2;
-    while(repeat > 0){
-        while(queue_size > 0){
+    while(1){
+        do{
             // Starting SPI
             spi_handle = spiOpen(spi_channel,spi_speed,0);
             if(verify_spi(spi_handle) < 0){ return 1; }
@@ -164,7 +163,8 @@ int main(int argc, char *argv[]){
             message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
             convert_to_data(rx_buf, &data_rx);
 
-            for(int i=0; i<FIFO_SIZE;i++){
+
+            for(int i=0; i<data_rx.count;i++){
               fprintf(file_ptr, "%d,%d,%d,%d,%d,%d,%d\n",
                       data_rx.block,data_rx.count,
                       data_rx.overrun,data_rx.queue_state,
@@ -174,12 +174,15 @@ int main(int argc, char *argv[]){
 
             spiClose(spi_handle);
             queue_size = data_rx.queue_state;
+
+            printf("Queue_size: %d\n", queue_size);
+
             delay_ms(MS_PER_SECOND*0.01);
-        }
-        delay_ms(MS_PER_SECOND*0.1);
-        repeat--;
-        queue_size = 1;
+        }while(queue_size > 0);
+        delay_ms(5*MS_PER_SECOND);
     }
+
+    delay_ms(MS_PER_SECOND*0.1);
     fclose(file_ptr);
     return 0;
 }
