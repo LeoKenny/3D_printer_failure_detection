@@ -11,6 +11,7 @@
 #define BUFFER_SIZE (FIFO_SIZE*2*3)+HEADER_SIZE
 
 const double conversion_const = (2.0*16.0)/8192;       // +-16g for 13 bits, pg 27
+const time_t duration = 2*60*60;                    // 2 hours
 
 // SPI comm configuration
 const int spi_speed = 2000000;                      // SPI communication speed, bps
@@ -146,9 +147,11 @@ int main(int argc, char *argv[]){
     fifo_accel data_rx;
     FILE* file_ptr;
     uint16_t queue_size;
-    char filename[30];
-    time_t t = time(NULL);
-    struct tm *now = localtime(&t);
+    char filename[30] = "";
+    char timestamp[30];
+    time_t start_time = time(NULL);
+    struct tm *now = localtime(&start_time);
+
 
     clear_fifo(&data_rx); 
 
@@ -159,14 +162,21 @@ int main(int argc, char *argv[]){
     }
 
     // Opening the save file
-    strftime(filename, sizeof(filename), "%m_%d_%H_%M_%S.csv", now);
+    strftime(timestamp, sizeof(timestamp), "%m_%d_%H_%M_%S.csv", now);
+    if (argc>1){
+        strcat(filename,argv[1]);
+        strcat(filename,timestamp);
+    }
+    else{
+        strcat(filename,timestamp);
+    }
     file_ptr = fopen(filename, "w+");
     if (file_ptr == NULL) {
         perror("Failed to create the file");
     } 
     fprintf(file_ptr, "block,count,overrun,queue_state,accel_x,accel_y,accel_z\n");
 
-    while(1){
+    while(difftime(time(NULL), start_time) <= duration){
         do{
             // Starting SPI
             spi_handle = spiOpen(spi_channel,spi_speed,0);
