@@ -145,15 +145,18 @@ int main(int argc, char *argv[]){
     int spi_handle;
     int message_handle;
     fifo_accel data_rx;
+    fifo_accel data_tx;
     FILE* file_ptr;
     uint16_t queue_size;
     char filename[30] = "";
     char timestamp[30];
     time_t start_time = time(NULL);
     struct tm *now = localtime(&start_time);
+    uint32_t block = 0;
 
 
     clear_fifo(&data_rx); 
+    clear_fifo(&data_tx); 
 
     // Starting GPIO
     if (gpioInitialise() == PI_INIT_FAILED){      // pigpio initialisation failed.
@@ -176,27 +179,30 @@ int main(int argc, char *argv[]){
     } 
     fprintf(file_ptr, "block,count,overrun,queue_state,accel_x,accel_y,accel_z\n");
 
+    // Starting SPI
+    spi_handle = spiOpen(spi_channel,spi_speed,0);
+    if(verify_spi(spi_handle) < 0){ return 1; }
+
     while(difftime(time(NULL), start_time) <= duration){
         do{
-            // Starting SPI
-            spi_handle = spiOpen(spi_channel,spi_speed,0);
-            if(verify_spi(spi_handle) < 0){ return 1; }
+                        convert_to_buffer(tx_buf,data_tx);
 
             delay_ms(0.1);
             message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
 
             if (message_handle > 0){
                 convert_to_data(rx_buf, &data_rx);
-                for(int i=0; i<data_rx.count;i++){
-                  fprintf(file_ptr, "%ld,%d,%d,%d,%d,%d,%d\n",
-                          (unsigned long)data_rx.block,data_rx.count,
-                          data_rx.overrun,data_rx.queue_state,
-                          data_rx.accel_x[i],data_rx.accel_y[i],data_rx.accel_z[i]
-                          );
+                convert_to_data(rx_buf, &data_tx);
+                if(block == data_rx.block){
+                    for(int i=0; i<data_rx.count;i++){
+                      fprintf(file_ptr, "%ld,%d,%d,%d,%d,%d,%d\n",
+                              (unsigned long)data_rx.block,data_rx.count,
+                              data_rx.overrun,data_rx.queue_state,
+                              data_rx.accel_x[i],data_rx.accel_y[i],data_rx.accel_z[i]
+                              );
+                    }
+                    queue_size = data_rx.queue_state;
                 }
-
-                spiClose(spi_handle);
-                queue_size = data_rx.queue_state;
             }
             else{
                 clear_fifo(&data_rx);
@@ -207,6 +213,7 @@ int main(int argc, char *argv[]){
         printf("Block: %ld\n", (unsigned long)data_rx.block);
         delay_ms(20);
     }
+    spiClose(spi_handle);
     fclose(file_ptr);
     return 0;
 }
