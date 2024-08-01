@@ -202,6 +202,7 @@ int main(int argc, char *argv[]){
                               );
                     }
                     queue_size = data_rx.queue_state;
+                    block++;
                 }
             }
             else{
