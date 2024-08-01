@@ -36,6 +36,7 @@
 #define DATAZ0 0x36
 #define FIFO_CTL 0x38
 #define FIFO_STATUS 0x39
+#define COMM_ERROR_BIT 1
 
 // Tasks constants
 #define SAVE_STACK_SIZE 4096
@@ -57,7 +58,7 @@ typedef struct fifo_accel{
   int16_t accel_z[FIFO_SIZE];
   uint8_t count;
   uint32_t block;
-  bool overrun;
+  uint8_t overrun;
   uint16_t queue_state;
 } fifo_accel;
 
@@ -104,6 +105,8 @@ void convert_to_data(uint8_t* rx_buf, fifo_accel* rx_data){
   memcpy((void*)(rx_data->accel_y), (void*)(rx_buf+size_header+size), size);
   memcpy((void*)(rx_data->accel_z), (void*)(rx_buf+size_header+(2*size)), size);
 }
+
+
 
 void initialise_comm() {
   Serial.begin(115200);
@@ -255,7 +258,8 @@ void vTaskSave(void * pvParams){
     convert_to_data(rx_buf, &fifo_data_rx);
     if(fifo_data_old.block != fifo_data_rx.block){
       Serial.println(fifo_data_rx.block);
-      xQueueSendToFront(xQueueSave, &fifo_data_old, xFrequencyQueue);
+      fifo_data_old.overrun |= 1 << COMM_ERROR_BIT;
+      xQueueSendToFront(xQueueSave, &fifo_data_old, xFrequencyRead);
     }
 
     memcpy((void*)&(fifo_data_old.count), (void*)&(fifo_data.count), sizeof(fifo_data.count));
