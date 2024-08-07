@@ -185,15 +185,14 @@ int main(int argc, char *argv[]){
 
     while(difftime(time(NULL), start_time) <= duration){
         do{
-                        convert_to_buffer(tx_buf,data_tx);
+            convert_to_buffer(tx_buf,data_tx);
 
             delay_ms(0.1);
             message_handle = spi_write_and_read(spi_handle,tx_buf,rx_buf,BUFFER_SIZE);
 
             if (message_handle > 0){
                 convert_to_data(rx_buf, &data_rx);
-                convert_to_data(rx_buf, &data_tx);
-                if(block == data_rx.block){
+                if (data_rx.block == block){
                     for(int i=0; i<data_rx.count;i++){
                       fprintf(file_ptr, "%ld,%d,%d,%d,%d,%d,%d\n",
                               (unsigned long)data_rx.block,data_rx.count,
@@ -202,17 +201,19 @@ int main(int argc, char *argv[]){
                               );
                     }
                     queue_size = data_rx.queue_state;
+                    convert_to_data(rx_buf, &data_tx);
                     block++;
                 }
             }
             else{
                 clear_fifo(&data_rx);
+                clear_fifo(&data_tx);
                 queue_size = 0;
             }
             delay_ms(1);
         }while(queue_size > 0);
         printf("Block: %ld\n", (unsigned long)data_rx.block);
-        delay_ms(20);
+        delay_ms(25);
     }
     spiClose(spi_handle);
     fclose(file_ptr);
