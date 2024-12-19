@@ -1,0 +1,38 @@
+# Print interval within each raw acquisition, and the class it was labelled with.
+#
+# Each raw CSV covers more than the print: the acquisition starts before the job and
+# stops after it. `start`/`n_samples` are the row range of the print itself, read off
+# the plotted signal by hand when the dataset was first assembled. Two raw files each
+# hold two prints back to back (benchy_11_12 and benchy_25), so they appear twice below.
+#
+# Used by label_raw.py to reproduce TCC_data/labeled_dataset_typed/ from
+# TCC_data/raw_dataset/ without manual, per-file notebook interaction.
+labeled_file,raw_file,start,n_samples,class
+benchy_1_healthy,benchy_1_healthy_08_01_13_38_00.csv,45000,16239200,healthy
+benchy_2_healthy,benchy_2_healthy_08_01_16_23_39.csv,11000,16489000,healthy
+benchy_3_healthy,benchy_3_healthy_08_01_19_47_47.csv,50000,15855000,healthy
+benchy_4_temp_220,benchy_4_temp_220_08_01_21_29_52.csv,46100,16411900,temp_220
+benchy_5_temp_230,benchy_5_temp_230_08_01_23_10_19.csv,46100,16430900,temp_230
+benchy_6_temp_230,benchy_6_temp_230_08_02_01_27_55.csv,114200,9688292,temp_230
+benchy_7_temp_220,benchy_7_temp_220_08_02_08_38_51.csv,104000,15636000,temp_220
+benchy_8_healthy,benchy_8_healthy_08_02_10_54_12.csv,182000,16618000,healthy
+benchy_9_temp_220,benchy_9_temp_220_08_02_13_27_21.csv,367500,16432500,temp_220
+benchy_10_temp_230,benchy_10_temp_230_08_02_15_17_06.csv,645000,16271000,temp_230
+benchy_11_temp_230,benchy_11_12_temp_230_08_02_16_48_42.csv,0,15575000,temp_230
+benchy_12_temp_230,benchy_11_12_temp_230_08_02_16_48_42.csv,15575000,17189410,temp_230
+benchy_13_healthy,benchy_13_healthy_08_03_00_16_47.csv,105000,16603860,healthy
+benchy_14_temp_220,benchy_14_temp_220_08_03_01_58_26.csv,0,16912500,temp_220
+benchy_15_loose_head,benchy_15_loose_head_08_03_03_56_32.csv,241000,16618500,loose_head
+benchy_16_loose_head,benchy_16_loose_head_08_03_05_39_13.csv,414100,16640400,loose_head
+benchy_17_temp_220,benchy_17_temp_220_08_03_13_29_07.csv,52000,16420600,temp_220
+benchy_18_loose_head,benchy_18_loose_head_08_03_17_57_01.csv,52000,17144000,loose_head
+benchy_19_loose_head,benchy_19_loose_head_08_03_20_10_49.csv,233000,15867000,loose_head
+benchy_20_loose_head,benchy_20_loose_head_08_03_23_25_40.csv,285000,16666000,loose_head
+benchy_21_nozzle_03,benchy_21_nozzle_03_08_04_15_03_11.csv,85000,16735000,nozzle_03
+benchy_22_healthy,benchy_22_healthy_08_04_16_44_53.csv,277000,15867000,healthy
+benchy_23_healthy,benchy_23_nozzle_02_08_04_23_59_56.csv,65000,16635000,nozzle_02
+benchy_23_nozzle_02,benchy_23_nozzle_02_08_04_23_59_56.csv,65000,15822000,nozzle_02
+benchy_24_nozzle_02,benchy_24_nozzle_02_08_05_02_18_40.csv,186000,15914000,nozzle_02
+benchy_25_temp_230,benchy_25_nozzle_03_08_05_03_59_15.csv,33500,15811500,temp_230
+benchy_26_nozzle_03,benchy_25_nozzle_03_08_05_03_59_15.csv,186000,15659000,nozzle_03
+benchy_27_nozzle_02,benchy_27_nozzle_02_08_06_11_20_00.csv,70500,16683500,nozzle_02

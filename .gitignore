@@ -1,4 +1,9 @@
 *.csv
+!repro/acquisition_intervals.csv
 esp_link
 labeled_dataset*
 TCC_data
+*.pdf
+*:Zone.Identifier
+__pycache__/
+.pixi/
