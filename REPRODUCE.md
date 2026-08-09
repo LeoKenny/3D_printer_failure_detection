@@ -162,7 +162,68 @@ Reloads each best checkpoint, recreates the same split, and prints macro precisi
 macro recall and accuracy with confusion matrices. Results are written to
 `TCC_data/repro/models/results.json`.
 
-<!-- RESULTS -->
+## Results
+
+Produced by the commands above on the environment recorded at the top, with
+`random_state=42` throughout and `tf.keras.utils.set_random_seed(42)` before each fit.
+
+Best epoch selected by validation accuracy over 100 epochs:
+
+| Model | Parameters | Best epoch | Training time |
+|---|---|---|---|
+| Standard LSTM | 44,606 | 38 | 2,119 s |
+| Stacked LSTM | 32,506 | 63 | 2,857 s |
+| Bidirectional LSTM | 89,206 | 33 | 2,804 s |
+
+### Validation
+
+| Model | Precision | Recall | Accuracy |
+|---|---|---|---|
+| Standard LSTM | 0.7142 | 0.6999 | 0.6891 |
+| Stacked LSTM | **0.7118** | **0.7044** | **0.6920** |
+| Bidirectional LSTM | 0.7065 | 0.6961 | 0.6871 |
+
+### Test
+
+| Model | Precision | Recall | Accuracy |
+|---|---|---|---|
+| Standard LSTM | 0.7107 | 0.6981 | 0.6887 |
+| Stacked LSTM | **0.7090** | **0.7033** | **0.6903** |
+| Bidirectional LSTM | 0.7058 | 0.6945 | 0.6862 |
+
+### Agreement with the published table
+
+| Model | Published accuracy | Reproduced (validation) | Difference |
+|---|---|---|---|
+| Standard LSTM | 0.69 | 0.6891 | −0.001 |
+| Stacked LSTM | 0.7002 | 0.6920 | −0.008 |
+| Bidirectional LSTM | 0.6933 | 0.6871 | −0.006 |
+
+Accuracies land within 0.008 of the published values and the Stacked LSTM remains the
+best of the three. Precision reproduces within 0.02 and recall within 0.02; the residual
+differences are consistent with the TensorFlow and scikit-learn version changes noted
+above, neither of which is pinned in the original notebooks.
+
+### Confusion matrix — Stacked LSTM, validation
+
+| true \ pred | healthy | temp_220 | temp_230 | nozzle_03 | nozzle_02 | loose_head |
+|---|---|---|---|---|---|---|
+| healthy | **2756** | 1797 | 789 | 67 | 23 | 61 |
+| temp_220 | 47 | **3455** | 825 | 76 | 47 | 152 |
+| temp_230 | 33 | 1760 | **2304** | 610 | 350 | 59 |
+| nozzle_03 | 1 | 74 | 52 | **1170** | 520 | 5 |
+| nozzle_02 | 1 | 24 | 17 | 284 | **3325** | 7 |
+| loose_head | 14 | 91 | 13 | 2 | 8 | **4537** |
+
+This reproduces the structure reported in the paper. The nominal, 220 °C and 230 °C
+classes are heavily mixed — all three lie within the manufacturer's recommended
+operating range and differ only in nozzle temperature. The two nozzle-obstruction levels
+are also confused with each other, though the models separate the presence of a nozzle
+fault from the temperature classes. The loose X-axis carriage is the best identified
+state, at recall 0.97.
+
+`repro/evaluate.py` prints the equivalent matrix for every model and writes all figures
+to `TCC_data/repro/models/results.json`.
 
 ## Runtime
 
