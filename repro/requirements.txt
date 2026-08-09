@@ -1,0 +1,16 @@
+# Dataset preparation and feature extraction.
+# Verified with numpy 2.5.1, pandas 3.0.5, pyarrow 25.0.0, scipy 1.18.0,
+# scikit-learn 1.9.0 on Python 3.13.
+numpy>=1.24
+pandas>=1.5          # data_downsampling.ipynb uses DataFrame.rolling(step=)
+pyarrow>=12
+scipy>=1.9           # Butterworth design in data_downsampling.ipynb
+scikit-learn>=1.2
+matplotlib>=3.6
+seaborn>=0.12
+plotly>=5.11         # raw_data_manipulation.ipynb
+tqdm>=4.64
+
+# Training. Install in its own environment: it pins numpy tightly.
+# Published results used TensorFlow 2.17 / Keras 3; reproduced on 2.19 / Keras 3.9.
+# tensorflow>=2.16
