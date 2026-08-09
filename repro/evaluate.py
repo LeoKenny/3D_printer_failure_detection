@@ -69,8 +69,12 @@ def main():
         model = tf.keras.models.load_model(path)
         results[name] = {split: metrics(model, *data) for split, data in splits.items()}
 
-    with open(os.path.join(args.models_dir, "results.json"), "w") as fh:
-        json.dump(results, fh, indent=1)
+    # merge, so evaluating the image models does not discard the handcrafted ones
+    results_path = os.path.join(args.models_dir, "results.json")
+    stored = json.load(open(results_path)) if os.path.exists(results_path) else {}
+    stored.update(results)
+    with open(results_path, "w") as fh:
+        json.dump(stored, fh, indent=1)
 
     for split in ("validation", "test"):
         print(f"\n### {split}\n")

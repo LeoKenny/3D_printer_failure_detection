@@ -174,6 +174,8 @@ Best epoch selected by validation accuracy over 100 epochs:
 | Standard LSTM | 44,606 | 38 | 2,119 s |
 | Stacked LSTM | 32,506 | 63 | 2,857 s |
 | Bidirectional LSTM | 89,206 | 33 | 2,804 s |
+| CNN-LSTM | 165,522 | 49 | 2,840 s |
+| Bidirectional CNN-LSTM | 620,022 | 17 | 2,832 s |
 
 ### Validation
 
@@ -182,6 +184,8 @@ Best epoch selected by validation accuracy over 100 epochs:
 | Standard LSTM | 0.7142 | 0.6999 | 0.6891 |
 | Stacked LSTM | **0.7118** | **0.7044** | **0.6920** |
 | Bidirectional LSTM | 0.7065 | 0.6961 | 0.6871 |
+| CNN-LSTM | 0.6950 | 0.6666 | 0.6688 |
+| Bidirectional CNN-LSTM | 0.6850 | 0.6466 | 0.6587 |
 
 ### Test
 
@@ -190,6 +194,8 @@ Best epoch selected by validation accuracy over 100 epochs:
 | Standard LSTM | 0.7107 | 0.6981 | 0.6887 |
 | Stacked LSTM | **0.7090** | **0.7033** | **0.6903** |
 | Bidirectional LSTM | 0.7058 | 0.6945 | 0.6862 |
+| CNN-LSTM | 0.6940 | 0.6636 | 0.6685 |
+| Bidirectional CNN-LSTM | 0.6838 | 0.6467 | 0.6592 |
 
 ### Agreement with the published table
 
@@ -198,11 +204,18 @@ Best epoch selected by validation accuracy over 100 epochs:
 | Standard LSTM | 0.69 | 0.6891 | −0.001 |
 | Stacked LSTM | 0.7002 | 0.6920 | −0.008 |
 | Bidirectional LSTM | 0.6933 | 0.6871 | −0.006 |
+| CNN-LSTM | 0.6734 | 0.6688 | −0.005 |
+| Bidirectional CNN-LSTM | 0.6676 | 0.6587 | −0.009 |
 
-Accuracies land within 0.008 of the published values and the Stacked LSTM remains the
-best of the three. Precision reproduces within 0.02 and recall within 0.02; the residual
-differences are consistent with the TensorFlow and scikit-learn version changes noted
-above, neither of which is pinned in the original notebooks.
+Every accuracy lands within 0.009 of the published value, precision within 0.020 and
+recall within 0.022. The reported conclusions reproduce: the Stacked LSTM is the best
+model, the two hybrid CNN-LSTM architectures are the weakest, and the handcrafted
+representation outperforms the image-based one throughout. The only ordering change is
+between the Standard and Bidirectional LSTM, which are separated by 0.002 here and by
+0.003 in the published table.
+
+Residual differences are consistent with the TensorFlow and scikit-learn version changes
+noted above, neither of which is pinned in the original notebooks.
 
 ### Confusion matrix — Stacked LSTM, validation
 
