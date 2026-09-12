@@ -67,8 +67,8 @@ It also runs the notebook's acquisition-integrity checks before slicing — `ove
 communication-failure bit counts, `block` continuity via `df["block"].diff()`, and NaN
 checks on each axis — printed per file rather than plotted.
 
-Output: `TCC_data/labeled_dataset_typed/benchy_<n>_<class>.parquet.gzip`, 28 files from
-the 26 raw acquisitions (two raw files each hold two prints back to back).
+Output: `TCC_data/labeled_dataset_typed/benchy_<n>_<class>.parquet.gzip`, 27 files from
+the 26 raw acquisitions (one raw file holds two back-to-back prints: benchy_11_12).
 
 ## Stage 2 — filter and downsample to 200 Hz
 
@@ -88,7 +88,7 @@ sos = signal.butter(N, Wn, fs=3200, btype="low", output="sos")
 Filtering is applied per axis, then each 16-sample window is reduced to its median,
 giving 200 Hz. `repro/downsample.py` runs this over the whole folder.
 
-Output: `TCC_data/labeled_dataset_downsampled_200_filter/`, 28 files.
+Output: `TCC_data/labeled_dataset_downsampled_200_filter/`, 27 files.
 
 ## Stage 3 — features
 
@@ -107,12 +107,12 @@ order 1-2-3-1 to form a 44×4 image, reduced to `log10(|FFT2| + 1)`.
 Expected output:
 
 ```
-28 files in TCC_data/labeled_dataset_downsampled_200_filter
-  normalisation mean=[-0.021804 -0.000209  0.319926] std=[0.03814  0.024902 0.142855]
+27 files in TCC_data/labeled_dataset_downsampled_200_filter
+  normalisation mean=[-0.022767 -0.000250  0.425919] std=[0.040802 0.026676 0.110972]
   ...
-  handcrafted (128061, 10, 9) -> TCC_data/repro/x_data.npy
-  per-class sequences: [27744, 23239, 25839, 9202, 18478, 23559]
-  image       (128061, 10, 44, 4) -> TCC_data/repro/x_image.npy
+  handcrafted (124175, 10, 9) -> TCC_data/repro/x_data.npy
+  per-class sequences: [27744, 23239, 26404, 9245, 13984, 23559]
+  image       (124175, 10, 44, 4) -> TCC_data/repro/x_image.npy
 ```
 
 Windowing is done with `sliding_window_view`.
@@ -181,21 +181,21 @@ Best epoch selected by validation accuracy over 100 epochs:
 
 | Model                  | Precision  | Recall     | Accuracy   |
 | ---------------------- | ---------- | ---------- | ---------- |
-| Standard LSTM          | 0.7142     | 0.6999     | 0.6891     |
-| Stacked LSTM           | **0.7118** | **0.7044** | **0.6920** |
-| Bidirectional LSTM     | 0.7065     | 0.6961     | 0.6871     |
-| CNN-LSTM               | 0.6950     | 0.6666     | 0.6688     |
-| Bidirectional CNN-LSTM | 0.6850     | 0.6466     | 0.6587     |
+| Standard LSTM          | 0.7319     | 0.6949     | 0.6847     |
+| Stacked LSTM           | **0.7082** | **0.7042** | **0.6800** |
+| Bidirectional LSTM     | 0.6938     | 0.6906     | 0.6697     |
+| CNN-LSTM               | 0.7081     | 0.6779     | 0.6667     |
+| Bidirectional CNN-LSTM | 0.6965     | 0.6582     | 0.6543     |
 
 ### Test
 
 | Model                  | Precision  | Recall     | Accuracy   |
 | ---------------------- | ---------- | ---------- | ---------- |
-| Standard LSTM          | 0.7107     | 0.6981     | 0.6887     |
-| Stacked LSTM           | **0.7090** | **0.7033** | **0.6903** |
-| Bidirectional LSTM     | 0.7058     | 0.6945     | 0.6862     |
-| CNN-LSTM               | 0.6940     | 0.6636     | 0.6685     |
-| Bidirectional CNN-LSTM | 0.6838     | 0.6467     | 0.6592     |
+| Standard LSTM          | 0.7358     | 0.6967     | 0.6869     |
+| Stacked LSTM           | **0.7057** | **0.7023** | **0.6783** |
+| Bidirectional LSTM     | 0.6958     | 0.6927     | 0.6713     |
+| CNN-LSTM               | 0.7094     | 0.6778     | 0.6669     |
+| Bidirectional CNN-LSTM | 0.6914     | 0.6544     | 0.6504     |
 
 ### Agreement with the published table
 
@@ -214,12 +214,12 @@ representation outperforms the image-based one throughout.
 
 | true \ pred | healthy  | temp_220 | temp_230 | nozzle_03 | nozzle_02 | loose_head |
 | ----------- | -------- | -------- | -------- | --------- | --------- | ---------- |
-| healthy     | **2756** | 1797     | 789      | 67        | 23        | 61         |
-| temp_220    | 47       | **3455** | 825      | 76        | 47        | 152        |
-| temp_230    | 33       | 1760     | **2304** | 610       | 350       | 59         |
-| nozzle_03   | 1        | 74       | 52       | **1170**  | 520       | 5          |
-| nozzle_02   | 1        | 24       | 17       | 284       | **3325**  | 7          |
-| loose_head  | 14       | 91       | 13       | 2         | 8         | **4537**   |
+| healthy     | **2769** | 1752     | 822      | 78        | 32        | 40         |
+| temp_220    | 30       | **3318** | 926      | 116       | 73        | 138        |
+| temp_230    | 21       | 1685     | **2362** | 256       | 842       | 62         |
+| nozzle_03   | 0        | 43       | 54       | **1218**  | 514       | 2          |
+| nozzle_02   | 2        | 11       | 10       | 212       | **2529**  | 4          |
+| loose_head  | 9        | 104      | 17       | 3         | 10        | **4522**   |
 
 This reproduces the structure reported in the paper. The nominal, 220 °C and 230 °C
 classes are heavily mixed — all three lie within the manufacturer's recommended
