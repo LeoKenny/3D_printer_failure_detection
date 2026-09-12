@@ -54,7 +54,8 @@ def main():
     for row in intervals.itertuples(index=False):
         if row.raw_file not in raw_cache:
             raw_cache.clear()  # one raw CSV resident at a time; each is ~500 MB
-            df = pd.read_csv(os.path.join(args.raw, row.raw_file))
+            # Read with low_memory=False to use a single pass (faster, less memory overhead)
+            df = pd.read_csv(os.path.join(args.raw, row.raw_file), low_memory=False)
             check_integrity(df, row.raw_file)
             raw_cache[row.raw_file] = df
         df = raw_cache[row.raw_file]

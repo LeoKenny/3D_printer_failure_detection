@@ -2,8 +2,8 @@
 #
 # Each raw CSV covers more than the print: the acquisition starts before the job and
 # stops after it. `start`/`n_samples` are the row range of the print itself, read off
-# the plotted signal by hand when the dataset was first assembled. Two raw files each
-# hold two prints back to back (benchy_11_12 and benchy_25), so they appear twice below.
+# the plotted signal by hand when the dataset was first assembled. One raw file
+# holds two back-to-back prints: benchy_11_12.
 #
 # Used by label_raw.py to reproduce TCC_data/labeled_dataset_typed/ from
 # TCC_data/raw_dataset/ without manual, per-file notebook interaction.
@@ -31,8 +31,7 @@ benchy_20_loose_head,benchy_20_loose_head_08_03_23_25_40.csv,285000,16666000,loo
 benchy_21_nozzle_03,benchy_21_nozzle_03_08_04_15_03_11.csv,85000,16735000,nozzle_03
 benchy_22_healthy,benchy_22_healthy_08_04_16_44_53.csv,277000,15867000,healthy
 benchy_23_healthy,benchy_23_nozzle_02_08_04_23_59_56.csv,65000,16635000,nozzle_02
-benchy_23_nozzle_02,benchy_23_nozzle_02_08_04_23_59_56.csv,65000,15822000,nozzle_02
 benchy_24_nozzle_02,benchy_24_nozzle_02_08_05_02_18_40.csv,186000,15914000,nozzle_02
-benchy_25_temp_230,benchy_25_nozzle_03_08_05_03_59_15.csv,33500,15811500,temp_230
-benchy_26_nozzle_03,benchy_25_nozzle_03_08_05_03_59_15.csv,186000,15659000,nozzle_03
+benchy_25_nozzle_03,benchy_25_nozzle_03_08_05_03_59_15.csv,33500,15811500,nozzle_03
+benchy_26_temp_230,benchy_26_temp_230_08_05_23_52_38.csv,0,17799839,temp_230
 benchy_27_nozzle_02,benchy_27_nozzle_02_08_06_11_20_00.csv,70500,16683500,nozzle_02
