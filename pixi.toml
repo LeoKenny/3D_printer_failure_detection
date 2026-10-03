@@ -1,0 +1,46 @@
+[workspace]
+name = "3d-printer-failure-detection"
+version = "0.1.0"
+description = "Fault detection for 3D printers from accelerometer data -- reproduction pipeline"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.13.*"
+numpy = "2.5.*"
+pandas = "3.0.*"
+pyarrow = ">=25.0.0,<26"
+scipy = "1.18.*"
+scikit-learn = "1.9.*"
+matplotlib = "*"
+seaborn = "*"
+plotly = "*"
+tqdm = "*"
+
+[feature.train.dependencies]
+python = "3.9.*"
+numpy = "2.0.*"
+pandas = "2.2.*"
+scipy = "1.13.*"
+scikit-learn = "1.6.*"
+
+[feature.train.pypi-dependencies]
+tensorflow = "==2.19.0"
+keras = "==3.9.2"
+
+[environments]
+default = { solve-group = "default" }
+train = { features = ["train"], no-default-feature = true, solve-group = "train" }
+
+[tasks]
+label = "python repro/label_raw.py"
+downsample = "python repro/downsample.py"
+features = "python repro/extract_features.py --check-pca --images"
+
+[feature.train.tasks]
+train-lstm = "python repro/train.py --models vanilla,stacked,bidirectional --epochs 100"
+train-cnn = "python repro/train.py --models cnn_lstm,cnn_bidirectional --images --epochs 100"
+evaluate-lstm = "python repro/evaluate.py --models vanilla,stacked,bidirectional"
+evaluate-cnn = "python repro/evaluate.py --models cnn_lstm,cnn_bidirectional --images"
+train = { depends-on = ["train-lstm", "train-cnn"] }
+evaluate = { depends-on = ["evaluate-lstm", "evaluate-cnn"] }
