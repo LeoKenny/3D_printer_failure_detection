@@ -6,7 +6,7 @@ as the original training notebooks (archived under [`notebooks/`](notebooks/)) i
 form that runs end to end and unattended.
 
 ```
-raw CSV  ──1──▶ labelled parquet ──2──▶ 200 Hz parquet ──3──▶ features ──4──▶ models ──5──▶ results
+raw acquisitions (CSV or Zenodo parquet) ──1──▶ labelled parquet ──2──▶ 200 Hz parquet ──3──▶ features ──4──▶ models ──5──▶ results
 ```
 
 ## Environment
@@ -32,18 +32,24 @@ Run a stage with `pixi run -e <environment> python repro/<script>.py`, or use th
 predefined tasks (`pixi run label`, `pixi run downsample`, `pixi run features`,
 `pixi run -e train train`, `pixi run -e train evaluate`) shown under each stage below.
 
-The published results were produced on TensorFlow 2.17 / Keras 3. A GPU is not required;
-on an RTX 3060 Laptop each LSTM model takes roughly 20 s per epoch at batch size 32.
+The `train` environment pins TensorFlow 2.19.0 and Keras 3.9.2 (Python 3.9). The `default`
+environment is the one used for stages 1-3.
 
-Two version-sensitive points are worth knowing if exact agreement matters:
+Floating-point results can differ between TensorFlow builds, CPU and GPU hardware, and
+library versions. The pinned environment makes the software match; it does not make
+training bit-identical across machines.
 
 ## Data layout
 
-Everything lives under `TCC_data/`, which is not tracked by git:
+Everything produced by the pipeline lives under `TCC_data/`, which is not tracked by git.
+The raw acquisitions are published on Zenodo ([record 22716165](https://zenodo.org/records/22716165))
+as 26 parquet files, one per raw acquisition. Download them into `TCC_data/parquet_raw_dataset/`
+(or use CSV files from the acquisition system in `TCC_data/raw_dataset/`).
 
 ```
 TCC_data/
-  raw_dataset/                              26 CSV files from the acquisition system
+  parquet_raw_dataset/                      26 parquet files from Zenodo (same rows as the CSVs)
+  raw_dataset/                              26 CSV files from the acquisition system (alternative input)
   labeled_dataset_typed/                    stage 1 output, 3200 Hz
   labeled_dataset_downsampled_200_filter/   stage 2 output, 200 Hz
   repro/                                    stages 3-5 outputs
@@ -52,10 +58,16 @@ TCC_data/
 ## Stage 1 — label the raw acquisitions
 
 ```bash
-pixi run label
+pixi run label                                   # reads TCC_data/raw_dataset (CSV)
 ```
 
-Each raw CSV covers more than the print itself: the acquisition is started before the
+From the Zenodo download instead:
+
+```bash
+pixi run python repro/label_raw.py --raw TCC_data/parquet_raw_dataset --raw-format parquet
+```
+
+Each raw acquisition covers more than the print itself: the acquisition is started before the
 job and stopped after it. `raw_data_manipulation.ipynb` originally cut this down by
 plotting `accel_x` and reading the print interval off by hand, one acquisition at a
 time. `repro/label_raw.py` carries out the same slicing unattended, from the interval
@@ -85,8 +97,9 @@ N, Wn = signal.buttord(wp=80, ws=100, gpass=1, gstop=40, analog=False, fs=3200)
 sos = signal.butter(N, Wn, fs=3200, btype="low", output="sos")
 ```
 
-Filtering is applied per axis, then each 16-sample window is reduced to its median,
-giving 200 Hz. `repro/downsample.py` runs this over the whole folder.
+Filtering is applied per axis. The 200 Hz samples are then taken from a 16-sample rolling
+median of the filtered signal, keeping every 16th value (`df.rolling(16).median()` followed
+by `iloc[15::16]`). `repro/downsample.py` runs this over the whole folder.
 
 Output: `TCC_data/labeled_dataset_downsampled_200_filter/`, 27 files.
 
@@ -135,7 +148,8 @@ x_val, x_test, y_val, y_test = train_test_split(
     x_rest, y_rest, test_size=0.34, random_state=42, stratify=y_rest)
 ```
 
-giving 89,642 / 25,356 / 13,063 sequences — 2,802 batches per epoch at batch size 32.
+giving 86,922 / 24,586 / 12,667 sequences (124,175 in total) — 2,717 training batches per
+epoch at batch size 32.
 
 All models use ReLU in the hidden layers, Glorot uniform initialisation and a softmax
 output, trained with Adam and categorical cross-entropy for 100 epochs.
@@ -146,8 +160,8 @@ output, trained with Adam and categorical cross-entropy for 100 epochs.
 | Standard LSTM          | LSTM(100) → Dropout(0.2) → Dense(6)                                           | 44,606     |
 | Stacked LSTM           | LSTM(50, seq) → LSTM(50) → Dropout(0.2) → Dense(6)                            | 32,506     |
 | Bidirectional LSTM     | Bi-LSTM(100) → Dropout(0.2) → Dense(6)                                        | 89,206     |
-| CNN-LSTM               | TD(Conv1D(32,3) → MaxPool(2) → Flatten) → LSTM(50, seq) → LSTM(50) → Dense(6) | 165,522    |
-| Bidirectional CNN-LSTM | TD(Conv1D(32,3) → MaxPool(2) → Flatten) → Bi-LSTM(100) → Dense(6)             | 620,022    |
+| CNN-LSTM               | TD(Conv1D(32,3) → MaxPool(2) → Flatten) → LSTM(50, seq) → Dropout(0.5) → LSTM(50) → Dropout(0.5) → Dense(6) | 165,522    |
+| Bidirectional CNN-LSTM | TD(Conv1D(32,3) → MaxPool(2) → Flatten) → Bi-LSTM(100) → Dropout(0.5) → Dense(6)                             | 620,022    |
 
 Outputs: `TCC_data/repro/models/best_<name>_model.keras` and
 `training_history_<name>.json` per model.
@@ -164,8 +178,14 @@ macro recall and accuracy with confusion matrices. Results are written to
 
 ## Results
 
-Produced by the commands above on the environment recorded at the top, with
-`random_state=42` throughout and `tf.keras.utils.set_random_seed(42)` before each fit.
+> **Provenance of these numbers.** The tables below were produced from the stored checkpoints
+> in `TCC_data/repro/models/`. Those checkpoints were trained on an earlier build of the
+> labelled data (their files are dated 9 Aug, before the label fix in commit `a011a7c`), so
+> rerunning stages 4-5 on the current data gives different numbers. Re-evaluating the stored
+> checkpoints with `repro/evaluate.py` reproduces the tables exactly.
+>
+> Training uses `random_state=42` throughout and `tf.keras.utils.set_random_seed(42)` before
+> each fit. The table below lists the best epoch of each stored training run.
 
 Best epoch selected by validation accuracy over 100 epochs:
 
@@ -181,8 +201,8 @@ Best epoch selected by validation accuracy over 100 epochs:
 
 | Model                  | Precision  | Recall     | Accuracy   |
 | ---------------------- | ---------- | ---------- | ---------- |
-| Standard LSTM          | 0.7319     | 0.6949     | 0.6847     |
-| Stacked LSTM           | **0.7082** | **0.7042** | **0.6800** |
+| Standard LSTM          | **0.7319** | 0.6949     | **0.6847** |
+| Stacked LSTM           | 0.7082     | **0.7042** | 0.6800     |
 | Bidirectional LSTM     | 0.6938     | 0.6906     | 0.6697     |
 | CNN-LSTM               | 0.7081     | 0.6779     | 0.6667     |
 | Bidirectional CNN-LSTM | 0.6965     | 0.6582     | 0.6543     |
@@ -191,24 +211,30 @@ Best epoch selected by validation accuracy over 100 epochs:
 
 | Model                  | Precision  | Recall     | Accuracy   |
 | ---------------------- | ---------- | ---------- | ---------- |
-| Standard LSTM          | 0.7358     | 0.6967     | 0.6869     |
-| Stacked LSTM           | **0.7057** | **0.7023** | **0.6783** |
+| Standard LSTM          | **0.7358** | 0.6967     | **0.6869** |
+| Stacked LSTM           | 0.7057     | **0.7023** | 0.6783     |
 | Bidirectional LSTM     | 0.6958     | 0.6927     | 0.6713     |
 | CNN-LSTM               | 0.7094     | 0.6778     | 0.6669     |
 | Bidirectional CNN-LSTM | 0.6914     | 0.6544     | 0.6504     |
 
-### Agreement with the published table
+### Comparison with the published accuracy
 
-| Model                  | Published accuracy |
-| ---------------------- | ------------------ |
-| Standard LSTM          | 0.6900             |
-| Stacked LSTM           | 0.7002             |
-| Bidirectional LSTM     | 0.6933             |
-| CNN-LSTM               | 0.6734             |
-| Bidirectional CNN-LSTM | 0.6676             |
+The published accuracy is not reproduced exactly by any model. Differences are the
+reproduced accuracy minus the published one:
 
-The reported conclusions reproduce: the Stacked LSTM is the best model, the two hybrid CNN-LSTM architectures are the weakest, and the handcrafted
-representation outperforms the image-based one throughout.
+| Model                  | Published accuracy | Validation (Δ) | Test (Δ)  |
+| ---------------------- | ------------------ | -------------- | --------- |
+| Standard LSTM          | 0.6900             | 0.6847 (−0.0053) | 0.6869 (−0.0031) |
+| Stacked LSTM           | 0.7002             | 0.6800 (−0.0202) | 0.6783 (−0.0219) |
+| Bidirectional LSTM     | 0.6933             | 0.6697 (−0.0236) | 0.6713 (−0.0220) |
+| CNN-LSTM               | 0.6734             | 0.6667 (−0.0067) | 0.6669 (−0.0065) |
+| Bidirectional CNN-LSTM | 0.6676             | 0.6543 (−0.0133) | 0.6504 (−0.0172) |
+
+The reproduced results do not match the published ranking. The Standard LSTM has the
+highest accuracy on both validation and test, while the published table has the Stacked
+LSTM first. The Stacked LSTM has the highest recall on both splits. The two hybrid
+CNN-LSTM architectures have the lowest accuracy on both splits: both use the image
+representation and score below all three handcrafted-feature LSTM models on both splits.
 
 ### Confusion matrix — Stacked LSTM, validation
 

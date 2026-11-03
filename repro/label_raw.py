@@ -10,8 +10,13 @@ this step can run over the whole folder unattended. The notebook's integrity che
 (overrun/comm-failure bits, block continuity, NaNs) are reproduced as printed diagnostics
 rather than a manual plot.
 
+The raw acquisitions are read either from the CSV files named in the intervals table
+(default) or from the parquet copies published on Zenodo (record 22716165), which have the
+same rows and columns with the file extension changed to `.parquet`.
+
 Usage:
     python repro/label_raw.py
+    python repro/label_raw.py --raw <folder-with-parquet> --raw-format parquet
 """
 
 from __future__ import annotations
@@ -37,10 +42,20 @@ def check_integrity(df, name):
           f"  block_gaps={gaps}  block_backwards={backwards}  nans={nans}")
 
 
+def read_raw(folder, raw_file, raw_format):
+    """Load one raw acquisition. `raw_file` is the CSV name from the intervals table."""
+    if raw_format == "csv":
+        return pd.read_csv(os.path.join(folder, raw_file), low_memory=False)
+    stem = os.path.splitext(raw_file)[0]
+    return pd.read_parquet(os.path.join(folder, stem + ".parquet"))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--raw", default="TCC_data/raw_dataset")
+    ap.add_argument("--raw-format", choices=["csv", "parquet"], default="csv",
+                    help="format of the raw acquisitions in --raw (default: csv)")
     ap.add_argument("--intervals", default="repro/acquisition_intervals.csv")
     ap.add_argument("--out", default="TCC_data/labeled_dataset_typed")
     args = ap.parse_args()
@@ -53,9 +68,8 @@ def main():
     raw_cache = {}
     for row in intervals.itertuples(index=False):
         if row.raw_file not in raw_cache:
-            raw_cache.clear()  # one raw CSV resident at a time; each is ~500 MB
-            # Read with low_memory=False to use a single pass (faster, less memory overhead)
-            df = pd.read_csv(os.path.join(args.raw, row.raw_file), low_memory=False)
+            raw_cache.clear()  # one raw acquisition resident at a time; each is ~500 MB
+            df = read_raw(args.raw, row.raw_file, args.raw_format)
             check_integrity(df, row.raw_file)
             raw_cache[row.raw_file] = df
         df = raw_cache[row.raw_file]
